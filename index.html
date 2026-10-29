@@ -50,6 +50,21 @@
       <p class="note" id="periodLine">—</p>
       <canvas id="chart" width="720" height="300"></canvas>
       <p class="note" id="hoverLine">Hover over the line to see a month's portfolio value.</p>
+      <h3>Drawdown chart</h3>
+      <p class="note">Drawdown is how far the portfolio is below its previous peak: value / peak − 1.</p>
+      <canvas id="drawdownChart" width="720" height="260"></canvas>
+      <p class="note" id="hoverDrawdownLine">Hover over the line to see a month's drawdown.</p>
+      <p id="drawdownLine">—</p>
+      <h3>Risk–return scatter plot</h3>
+      <p class="note">Horizontal axis: annualized volatility. Vertical axis: annualized return. Your portfolio is the large filled dot; presets are hollow dots; single ETFs are small squares.</p>
+      <p>Your annualized volatility: <strong id="volPortfolio">—</strong>　100% VOO annualized volatility: <strong id="volVOO">—</strong>　Volatility reduction vs 100% VOO: <strong id="volReduction">—</strong></p>
+      <p class="note">Volatility reduction = (σ<sub>VOO</sub> − σ<sub>portfolio</sub>) / σ<sub>VOO</sub> × 100%. A negative value means your portfolio was more volatile than 100% VOO over this period.</p>
+      <canvas id="scatterChart" width="720" height="340"></canvas>
+      <p class="note" id="scatterHoverLine">Hover near a point to see its name, volatility, and return.</p>
+      <table id="scatterTable">
+        <thead><tr><th>Portfolio / ETF</th><th>Annualized volatility</th><th>Annualized return</th></tr></thead>
+        <tbody></tbody>
+      </table>
       <h3>How each ETF did on its own over the same period</h3>
       <table id="etfTable">
         <thead><tr><th>ETF</th><th>Your weight</th><th>Cumulative return</th></tr></thead>
@@ -61,8 +76,10 @@
   <section>
     <h2>Method and notes</h2>
     <p>Rebalanced monthly to your target weights: each month's portfolio return is the weighted average of the ETFs' monthly returns. The starting point is the first month's adjusted close in the selected range, compounded monthly from there.</p>
+    <p>Annualized volatility is the sample standard deviation of monthly returns multiplied by √12. Annualized return is the compound annual growth rate over the selected period.</p>
+    <p>Drawdown recovery: for the worst drawdown, the peak is the highest portfolio value before the trough, the recovery date is the first month after the trough when the value reaches that peak again, and “not yet recovered” means it had not reached it by the end of the period.</p>
     <p id="dataNote">Data: month-end adjusted closes (including reinvested dividends), see data.js. Past performance does not predict future results; taxes, trading costs, and inflation are not included.</p>
-    <p>Why QQQM and SGOV have shorter histories: QQQM launched in October 2020 and SGOV in May 2020, so the common starting point for all five is October 2020. “All” therefore covers about 6 years, not decades. A longer history, using proxy indices or older ETFs, is a possible next step.</p>
+    <p>Why QQQM and SGOV have shorter histories: QQQM launched in October 2020 and SGOV in May 2020, so the common starting point for all thirteen ETFs is October 2020. “All” therefore covers about 6 years, not decades. A longer history, using proxy indices or older ETFs, is a possible next step.</p>
   </section>
 </main>
 
