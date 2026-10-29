@@ -1,22 +1,22 @@
-# ETF 组合模拟
+# ETF Portfolio Simulator
 
-简单交互式 ETF 组合模拟工具，帮我学习长期投资、理解不同资产配置对历史收益的影响。
+A simple interactive ETF portfolio simulator for learning long-term investing and seeing how different asset allocations would have performed historically.
 
 ## MVP
 
-- 输入：初始投资金额、VOO / QQQM / VXUS / BND / SGOV 的比例、时间范围（1 年 / 3 年 / 5 年 / 全部）
-- 输出：组合表现折线图、历史累计收益率、年化收益率，另附每只 ETF 在同一时间段的累计收益
-- 方法：每月按目标比例再平衡，月收益 = 各 ETF 月收益按比例加权平均
+- Inputs: initial investment, weights for VOO / QQQM / VXUS / BND / SGOV, time range (1 year / 3 years / 5 years / all)
+- Outputs: portfolio value chart, historical cumulative return, annualized return, plus each ETF's cumulative return over the same period
+- Method: monthly rebalancing; each month's portfolio return is the weighted average of the ETFs' monthly returns
 
-## 设计
+## Design
 
-黑底白字、左对齐，沿用过去网页（Vibe & Verify）的习惯：简洁轻便，不用彩色装饰。
+Black background, white text, left-aligned, following the habit of past pages (Vibe & Verify): simple and light, no colorful decoration.
 
-## 数据注意
+## Data note
 
-五只都有的共同起点是 2020 年 10 月末（QQQM 2020-10 成立，SGOV 2020-05 成立），所以“全部”约 6 年。
-数据文件是 `data.js`，月末调整后收盘价。过去表现不代表未来结果；不含税费、交易成本和通胀。
+The common starting point for all five ETFs is October 2020 (QQQM launched in October 2020, SGOV in May 2020), so “All” covers about 6 years.
+Data is in `data.js`: month-end adjusted closes. Past performance does not predict future results; taxes, trading costs, and inflation are not included.
 
-## 本地打开
+## Open locally
 
-直接用浏览器打开 `index.html` 即可，无需服务器。
+Open `index.html` in a browser. No server needed.

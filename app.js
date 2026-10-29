@@ -1,11 +1,11 @@
 // ETF portfolio simulator, monthly rebalancing.
 // DATA comes from data.js: { dates: [...], series: {VOO:[...], ...}, META:{...} }
 const ETFS = [
-  { sym: 'VOO', desc: '标普 500' },
-  { sym: 'QQQM', desc: '纳斯达克 100' },
-  { sym: 'VXUS', desc: '美国以外股票' },
-  { sym: 'BND', desc: '美国综合债券' },
-  { sym: 'SGOV', desc: '短期美国国债' },
+  { sym: 'VOO', desc: 'S&P 500' },
+  { sym: 'QQQM', desc: 'Nasdaq 100' },
+  { sym: 'VXUS', desc: 'Stocks outside the US' },
+  { sym: 'BND', desc: 'US total bond market' },
+  { sym: 'SGOV', desc: 'Short-term US Treasuries' },
 ];
 const PRESETS = {
   voo100: { VOO: 100, QQQM: 0, VXUS: 0, BND: 0, SGOV: 0 },
@@ -56,7 +56,7 @@ function compute() {
   const err = document.getElementById('error');
   const results = document.getElementById('results');
   const sumLine = document.getElementById('sumLine');
-  sumLine.textContent = `合计：${sum}%`;
+  sumLine.textContent = `Total: ${sum}%`;
   sumLine.className = sum === 100 ? '' : 'bad';
   if (sum !== 100 || initial <= 0 || !window.ETF_DATA || !ETF_DATA.dates.length) {
     err.hidden = !(sum !== 100);
@@ -87,9 +87,9 @@ function compute() {
   document.getElementById('cumReturn').textContent = fmtPct(cum);
   document.getElementById('annReturn').textContent = fmtPct(ann);
   document.getElementById('periodLine').textContent =
-    `${dates[start]} 至 ${dates[end]}，共 ${months} 个月`;
+    `${dates[start]} to ${dates[end]}, ${months} months`;
   document.getElementById('rangeNote').textContent =
-    `数据起止：${dates[0]} 至 ${dates[end]}。`;
+    `Data range: ${dates[0]} to ${dates[end]}.`;
   // Per-ETF own cumulative return over the same window.
   const tbody = document.querySelector('#etfTable tbody');
   tbody.innerHTML = '';
@@ -165,13 +165,13 @@ document.getElementById('chart').addEventListener('mousemove', e => {
   const rect = e.target.getBoundingClientRect();
   const i = Math.round(((e.clientX - rect.left) / rect.width) * (chartPoints.length - 1));
   const p = chartPoints[Math.max(0, Math.min(chartPoints.length - 1, i))];
-  document.getElementById('hoverLine').textContent = `${p.date}：${fmtMoney(p.value)}`;
+  document.getElementById('hoverLine').textContent = `${p.date}: ${fmtMoney(p.value)}`;
 });
 window.addEventListener('resize', drawChart);
 
 buildWeights();
 if (window.ETF_DATA && ETF_DATA.META) {
   document.getElementById('sourceLine').textContent =
-    `数据来源：${ETF_DATA.META.source}；截至 ${ETF_DATA.META.asOf}；${ETF_DATA.META.note}`;
+    `Data source: ${ETF_DATA.META.source}; through ${ETF_DATA.META.asOf}; ${ETF_DATA.META.note}`;
 }
 update();
