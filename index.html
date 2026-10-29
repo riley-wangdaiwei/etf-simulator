@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETF 组合模拟</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">ETF 组合模拟</div>
+  <p class="tagline">一笔钱，按比例分给 5 只 ETF，看看过去会怎样。学习工具，不是投资建议。</p>
+</header>
+
+<main>
+  <section>
+    <h2>输入</h2>
+    <label class="field-label" for="initial">初始投资金额（美元）</label>
+    <input id="initial" type="number" min="1" step="100" value="10000">
+
+    <div class="label">时间范围</div>
+    <div class="btn-row" id="rangeRow">
+      <button data-range="12">1 年</button>
+      <button data-range="36">3 年</button>
+      <button data-range="60">5 年</button>
+      <button data-range="all" class="on">全部</button>
+    </div>
+    <p class="note" id="rangeNote"></p>
+
+    <div class="label">ETF 比例（合计必须 = 100%）</div>
+    <div id="weights"></div>
+    <p id="sumLine">合计：100%</p>
+
+    <div class="label">快速预设</div>
+    <div class="btn-row" id="presetRow">
+      <button data-preset="voo100">100% VOO</button>
+      <button data-preset="us-intl">美股 + 国际</button>
+      <button data-preset="6040">60 / 40 股债</button>
+      <button data-preset="tech">科技偏重</button>
+      <button data-preset="conservative">保守</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>结果</h2>
+    <p id="error" class="error" hidden>比例合计不是 100%，请先调到 100% 再看结果。</p>
+    <div id="results">
+      <p class="big"><span id="finalValue">—</span></p>
+      <p>期末金额（起始 <span id="initialEcho">—</span>）</p>
+      <p>累计收益率：<strong id="cumReturn">—</strong>　年化收益率：<strong id="annReturn">—</strong></p>
+      <p class="note" id="periodLine">—</p>
+      <canvas id="chart" width="720" height="300"></canvas>
+      <p class="note" id="hoverLine">把鼠标移到线上，看某个月的组合价值。</p>
+      <h3>这段时间里，每只 ETF 自己走成怎样</h3>
+      <table id="etfTable">
+        <thead><tr><th>ETF</th><th>你的比例</th><th>该段累计收益</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>方法与说明</h2>
+    <p>每月按目标比例再平衡一次：当月组合收益 = 各 ETF 当月收益按你的比例加权平均。起点是所选时间范围第一个月的调整后收盘价，之后按月复利。</p>
+    <p id="dataNote">数据：月末调整后收盘价（已含分红再投资效果），见 data.js。过去表现不代表未来结果；这里不含税费、交易成本和通胀。</p>
+    <p>为什么 QQQM、SGOV 的历史比较短：QQQM 2020 年 10 月才成立，SGOV 2020 年 5 月成立，所以五只都有的共同起点是 2020 年 10 月末。“全部”就是从那时算起，约 6 年，不是几十年。想看更长历史，是下一步可以加代理指数或更老 ETF 的方向。</p>
+  </section>
+</main>
+
+<footer>
+  <p id="sourceLine">数据来源：见 data.js 里的 META。</p>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
