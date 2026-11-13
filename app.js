@@ -215,69 +215,73 @@ function setupCanvas(c) {
   return { ctx, W, H };
 }
 
-function drawChart() {
-  const c = document.getElementById('chart');
+// Shared line-chart renderer: the historical charts and the
+// forward-looking projection (polymarket.js) draw through this one
+// function, so layout, axes, colors, labels, and tooltips are
+// identical and only the data differs. opts: get (p => value,
+// default p.value), fmt (axis labels), zeroTop (drawdown: 0 at the
+// top, most negative at the bottom), band (forecast growth only:
+// [{lo, hi}] aligned with points, drawn as a shaded p10–p90 region
+// behind the line), lastDot (growth: dot on the last point).
+function drawLineChart(c, points, opts) {
   const { ctx, W, H } = setupCanvas(c);
-  if (chartPoints.length < 2) return;
-  const vals = chartPoints.map(p => p.value);
-  const min = Math.min(...vals), max = Math.max(...vals);
+  if (points.length < 2) return;
+  const get = opts.get || (p => p.value);
+  const vals = points.map(get);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (opts.band) {
+    opts.band.forEach(b => { lo = Math.min(lo, b.lo); hi = Math.max(hi, b.hi); });
+  }
+  if (opts.zeroTop) hi = 0;
   const padL = 8, padR = 8, padT = 14, padB = 26;
-  const x = i => padL + (i / (chartPoints.length - 1)) * (W - padL - padR);
-  const y = v => padT + (1 - (v - min) / (max - min || 1)) * (H - padT - padB);
+  const x = i => padL + (i / (points.length - 1)) * (W - padL - padR);
+  const y = v => padT + (1 - (v - lo) / (hi - lo || 1)) * (H - padT - padB);
   ctx.strokeStyle = '#222'; ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
-  [min, (min + max) / 2, max].forEach(v => {
+  [lo, (lo + hi) / 2, hi].forEach(v => {
     ctx.beginPath(); ctx.moveTo(padL, y(v)); ctx.lineTo(W - padR, y(v)); ctx.stroke();
-    ctx.fillText(fmtMoney(v), padL + 2, y(v) - 4);
+    ctx.fillText(opts.fmt(v), padL + 2, y(v) - 4);
   });
   const seen = new Set();
-  chartPoints.forEach((p, i) => {
+  points.forEach((p, i) => {
     const key = p.date.slice(0, 7);
-    if ((p.date.slice(5, 7) === '01' || i === 0 || i === chartPoints.length - 1) && !seen.has(key)) {
+    if ((p.date.slice(5, 7) === '01' || i === 0 || i === points.length - 1) && !seen.has(key)) {
       seen.add(key);
       ctx.fillText(key, Math.min(x(i), W - 58), H - 8);
     }
   });
+  if (opts.band) {
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.beginPath();
+    opts.band.forEach((b, i) => i === 0 ? ctx.moveTo(x(i), y(b.hi)) : ctx.lineTo(x(i), y(b.hi)));
+    for (let i = opts.band.length - 1; i >= 0; i--) ctx.lineTo(x(i), y(opts.band[i].lo));
+    ctx.closePath(); ctx.fill();
+  }
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath();
-  chartPoints.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y(p.value)) : ctx.lineTo(x(i), y(p.value)));
+  points.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y(get(p))) : ctx.lineTo(x(i), y(get(p))));
   ctx.stroke();
-  const last = chartPoints[chartPoints.length - 1];
-  ctx.fillStyle = '#fff'; ctx.beginPath();
-  ctx.arc(x(chartPoints.length - 1), y(last.value), 4, 0, Math.PI * 2); ctx.fill();
+  if (opts.lastDot) {
+    const last = points[points.length - 1];
+    ctx.fillStyle = '#fff'; ctx.beginPath();
+    ctx.arc(x(points.length - 1), y(get(last)), 4, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.lineWidth = 1;
+}
+
+function drawChart() {
+  drawLineChart(document.getElementById('chart'), chartPoints, { fmt: fmtMoney, lastDot: true });
 }
 
 function drawDrawdown() {
-  const c = document.getElementById('drawdownChart');
-  const { ctx, W, H } = setupCanvas(c);
-  if (drawdownPoints.length < 2) return;
-  const min = Math.min(...drawdownPoints.map(p => p.dd), 0);
-  const padL = 8, padR = 8, padT = 14, padB = 26;
-  const x = i => padL + (i / (drawdownPoints.length - 1)) * (W - padL - padR);
-  // Map 0 to top, min (most negative) to bottom.
-  const y2 = v => padT + (0 - v) / (0 - min || 1) * (H - padT - padB);
-  ctx.strokeStyle = '#222'; ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
-  [0, min / 2, min].forEach(v => {
-    ctx.beginPath(); ctx.moveTo(padL, y2(v)); ctx.lineTo(W - padR, y2(v)); ctx.stroke();
-    ctx.fillText(fmtPctPlain(v), padL + 2, y2(v) - 4);
-  });
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath();
-  drawdownPoints.forEach((p, i) => i === 0 ? ctx.moveTo(x(i), y2(p.dd)) : ctx.lineTo(x(i), y2(p.dd)));
-  ctx.stroke();
-  const seen = new Set();
-  drawdownPoints.forEach((p, i) => {
-    const key = p.date.slice(0, 7);
-    if ((p.date.slice(5, 7) === '01' || i === 0 || i === drawdownPoints.length - 1) && !seen.has(key)) {
-      seen.add(key);
-      ctx.fillText(key, Math.min(x(i), W - 58), H - 8);
-    }
-  });
+  drawLineChart(document.getElementById('drawdownChart'), drawdownPoints, { get: p => p.dd, fmt: fmtPctPlain, zeroTop: true });
 }
 
-function drawScatter() {
-  const c = document.getElementById('scatterChart');
+// Shared scatter renderer: same axes, point styles, labels, and
+// colors for the historical chart and the forward-looking projection.
+function drawScatterChart(c, points) {
   const { ctx, W, H } = setupCanvas(c);
-  if (!scatterPoints.length) return;
+  if (!points.length) return;
   const padL = 56, padR = 14, padT = 14, padB = 30;
-  const vols = scatterPoints.map(p => p.vol), anns = scatterPoints.map(p => p.ann);
+  const vols = points.map(p => p.vol), anns = points.map(p => p.ann);
   const xMax = Math.max(...vols) * 1.08;
   let yMin = Math.min(...anns), yMax = Math.max(...anns);
   const pad = (yMax - yMin) * 0.15 || 0.05;
@@ -300,10 +304,10 @@ function drawScatter() {
   }
   ctx.fillStyle = '#888';
   ctx.fillText('Annualized volatility →', W - 170, H - 10);
-  scatterPoints.forEach(p => {
+  points.forEach(p => {
     p.px = x(p.vol); p.py = y(p.ann);
   });
-  scatterPoints.forEach(p => {
+  points.forEach(p => {
     if (p.kind === 'current') {
       ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.px, p.py, 7, 0, Math.PI * 2); ctx.fill();
     } else if (p.kind === 'preset') {
@@ -313,11 +317,16 @@ function drawScatter() {
     }
   });
   ctx.fillStyle = '#eee'; ctx.font = '11px sans-serif';
-  scatterPoints.forEach(p => {
+  points.forEach(p => {
     const label = p.name;
     const tx = Math.min(p.px + 9, W - 110);
     ctx.fillText(label, tx, p.py - 8);
   });
+  c._scatterPoints = points;
+}
+
+function drawScatter() {
+  drawScatterChart(document.getElementById('scatterChart'), scatterPoints);
 }
 
 function update() { compute(); }

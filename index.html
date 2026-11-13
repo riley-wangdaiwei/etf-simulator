@@ -85,20 +85,22 @@
     </table>
     <p class="note">Method: Gamma API (<span>/public-search</span> for discovery, <span>/events?slug=</span> for detail). Index markets are price bands, shown as a distribution with the most likely band first. Correlation proxies are not claimed: the relevant contracts are weeks old, below the 60-observation threshold, so every proxy here is Provisional at most. Bid/ask is not shown — CLOB /book and /midpoint returned errors for valid tokens in testing, so prices are Gamma outcomePrices with volume and liquidity shown instead.</p>
 
-    <h3>Forward-looking portfolio — market-implied to Dec 31, 2026</h3>
-    <p class="note">Same three views as the backtest, but forward: what the market implies for <strong>your portfolio</strong> at Dec 31, 2026, from the S&amp;P 500 close bands. The S&amp;P distribution is direct market-implied data; each ETF is a proxy mapped to it through its beta to VOO (no historical alpha assumed), and the portfolio distribution comes from 4,000 simulated paths that keep the correlations between ETFs. Everything here recalculates when you change weights. Nothing is projected past Dec 31 — no market prices a longer horizon.</p>
+    <h3>Forward-looking portfolio — projected 12 months</h3>
+    <p class="note">Same three views as the backtest, but forward: what the market implies for <strong>your portfolio</strong> over the next 12 months, from the S&amp;P 500 Dec-2026 close bands. The S&amp;P distribution is direct market-implied data; each ETF is a proxy mapped to it through its beta to VOO (no historical alpha assumed), and the portfolio paths come from 4,000 simulations that keep the correlations between ETFs. Everything here recalculates when you change weights. The market prices only Dec 31, 2026 — the monthly shape and the months past Dec 31 are model assumptions, stated in the method note below, not market data.</p>
+    <h3>Projected Portfolio Growth</h3>
+    <p class="note">Median projected portfolio value over the next 12 months, starting at the actual current value (the backtest's final value). The band is the 10th–90th percentile across 4,000 paths — it shows uncertainty, not a guaranteed outcome.</p>
     <p id="polyProjLine">—</p>
     <canvas id="polyProjGrowth" width="720" height="300"></canvas>
-    <p class="note" id="polyProjGrowthHover">Hover over a bar to see how many of the 4,000 paths land there.</p>
-    <h3>Projected downside</h3>
-    <p class="note">Distribution of the portfolio's Dec-31 return. The shaded region is losing outcomes. This is the market-implied downside, not a drawdown path over time — there is no market data for the path in between.</p>
+    <p class="note" id="polyProjGrowthHover">Hover over the line to see a month's median, 10th, and 90th percentile values.</p>
+    <h3>Projected Portfolio Drawdown</h3>
+    <p class="note">Median projected drawdown, using the same formula as the historical chart: portfolio value / running peak − 1, computed separately for each simulated path, then the median across paths. Drawdown comes from projected portfolio values, never from changes in Polymarket probabilities.</p>
     <canvas id="polyProjDrawdown" width="720" height="260"></canvas>
-    <p class="note" id="polyProjDrawdownHover">Hover over a bar to see how many of the 4,000 paths land there.</p>
+    <p class="note" id="polyProjDrawdownHover">Hover over the line to see a month's median drawdown.</p>
     <p id="polyProjDrawdownLine">—</p>
-    <h3>Projected risk–return</h3>
-    <p class="note">Each ETF is one point: horizontal axis is projected volatility to Dec 31, vertical axis is projected return. Point size is portfolio weight; the large filled dot is your whole portfolio. All points are proxies (beta-mapped to the S&amp;P 500 Dec-2026 distribution), not direct market forecasts for that ETF.</p>
+    <h3>Projected Risk–Return</h3>
+    <p class="note">Projected annualized volatility (horizontal) vs projected annualized return (vertical). Each ETF is one point; the large filled dot is your whole portfolio. Same design, point styles, and tooltips as the historical scatter — only the metrics are projected, not historical.</p>
     <canvas id="polyProjScatter" width="720" height="340"></canvas>
-    <p class="note" id="polyProjScatterHover">Hover near a point to see its projected return, volatility, and weight.</p>
+    <p class="note" id="polyProjScatterHover">Hover near a point to see its projected volatility and annualized return.</p>
     <table id="polyProjTable">
       <thead><tr><th>ETF</th><th>Weight</th><th>Projected return</th><th>Projected volatility</th><th>Mapping</th></tr></thead>
       <tbody></tbody>

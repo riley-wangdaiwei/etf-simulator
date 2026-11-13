@@ -287,47 +287,57 @@
       setStatus('Live request failed. Try Refresh.');
     });
   }
-  // ---- Forward-looking portfolio projection (market-implied, to Dec 31, 2026) ----
+  // ---- Forward-looking portfolio projection: 12 months ----
   //
-  // Replaces the old per-market history charts. No S&P/WTI/Fed lines,
-  // no per-market points: these three charts are the portfolio, seen
-  // forward, and they recompute whenever weights change.
+  // The three charts below the table reuse the historical chart
+  // components (drawLineChart / drawScatterChart in app.js): same
+  // layout, axes, colors, labels, and tooltips. Only the data and the
+  // calculations change — except the growth chart, which adds one
+  // element the historical chart does not have: a p10–p90 band.
   //
-  // Method — single-factor model, anchored to the one genuine
-  // market-implied distribution Polymarket offers (S&P 500 close
-  // bands, Dec 31, 2026):
-  //   * Implied S&P distribution: the six close bands, probabilities
-  //     renormalized. Band midpoints are assumed (open-ended bands
-  //     take a $400-wide outer band: <$6,000 -> 5,800; >$8,000 ->
-  //     8,250); the assumption is stated on the page.
-  //   * S&P base level: VOO's latest month-end close from data.js
-  //     (Oct 2026) x 10.909, the SPX/VOO close ratio on 2026-10-30
-  //     (7,580.1 / 694.81). So the horizon is Oct 31 -> Dec 31,
-  //     matching the backtest's data vintage.
-  //   * Each ETF: CAPM-style, E[r_i] = r_f + beta_i * (E[r_M] - r_f),
-  //     with beta_i from 72 months of monthly returns in data.js and
-  //     r_f the 2-month T-bill return (SGOV's mean monthly return x 2).
-  //     No historical alpha is assumed: expected return comes only
-  //     from the market-implied S&P move, via beta.
-  //   * Portfolio distribution: 4,000 Monte Carlo paths. Each path
-  //     draws one S&P band by its market probability, then adds a
-  //     residual vector bootstrapped from a random historical month
-  //     (residuals demeaned per ETF, so no historical alpha leaks in;
-  //     drawing a whole month's vector keeps the correlations between
-  //     ETFs that the user asked to account for).
-  //   * Per-ETF vol: sqrt(beta^2 * SD_M^2 + 2 * residual monthly
-  //     variance). Portfolio vol comes from the simulated paths.
-  //   * Labels: the S&P distribution is Direct (market-implied);
-  //     every ETF is a Proxy (beta-mapped to that distribution).
-  //     QQQM's own Nasdaq-100 bands exist but are untradable
-  //     (prices sum to ~317%, ~$0 volume), so QQQM uses the same
-  //     beta proxy as the other equities — stated, not hidden.
-  //   * Nothing is projected past Dec 31, 2026: no market prices a
-  //     longer horizon, and inventing one would be fabrication.
+  // Documented modeling method (also stated on the page):
+  //   1. Market-implied anchor (real Polymarket data): the S&P 500
+  //      Dec-31, 2026 close bands give a market-implied distribution
+  //      for the index over ~2 months (Oct 31 -> Dec 31): mean E and
+  //      standard deviation SD. Band probabilities are renormalized;
+  //      band midpoints are assumed (open-ended bands $400 wide).
+  //      Base S&P level = VOO's Oct-2026 close x 10.909 (SPX/VOO
+  //      closes on 2026-10-30). No market prices beyond Dec 31.
+  //   2. Monthly market (model): monthly mean mu = E/2 and monthly
+  //      vol sigma = SD/sqrt(2). Months 1–2 of each path draw one
+  //      band return and split it across the two months (with noise
+  //      chosen so each month keeps vol sigma); months 3–12 draw
+  //      from a normal with the same monthly mean and vol. The
+  //      monthly shape and everything past Dec 31 are MODEL
+  //      assumptions, not market data — the market prices only the
+  //      2-month distribution, and this extension assumes its mean
+  //      and vol persist.
+  //   3. ETFs (model): CAPM-style, monthly r_i = r_f + beta_i *
+  //      (r_M - r_f) + eps_i, beta_i from 72 months of returns in
+  //      data.js, r_f the T-bill rate (SGOV mean monthly return).
+  //      No historical alpha is assumed. eps_i is bootstrapped as a
+  //      whole historical month's residual vector (demeaned per ETF),
+  //      so the correlations between ETFs are kept.
+  //   4. Paths: 4,000 simulated 12-month paths, starting at the
+  //      actual current portfolio value (the backtest's final value).
+  //      Growth shows the median path with a p10–p90 band.
+  //      Drawdown uses the exact historical formula,
+  //      Value / running peak - 1, computed separately for each
+  //      path, then the median across paths. The scatter shows
+  //      projected annualized return vs volatility per ETF and for
+  //      the portfolio (same axes and point styles as historical).
+  //   5. Labels: VOO is Direct (the S&P distribution is its market).
+  //      Other ETFs are Proxy when their historical correlation with
+  //      VOO is >= 0.70, Provisional below that. SGOV/BIL are
+  //      Rate-based: their return comes from the T-bill rate, not
+  //      the S&P market. QQQM uses the S&P beta proxy because its
+  //      Nasdaq-100 bands are untradable (prices sum to ~317%).
   var SPX_VOO_RATIO = 10.909; // SPX / VOO closes, 2026-10-30
   var BAND_MIDS = { '<$6,000': 5800, '$6,000-$6,500': 6250, '$6,500-$7,000': 6750, '$7,000-$7,500': 7250, '$7,500-$8,000': 7750, '>$8,000': 8250 };
   var N_SIMS = 4000;
+  var N_MONTHS = 12;
   var projState = null; // { events, fm, spx } — kept in memory only, no storage
+  var lastRes = null;
 
   function mean(xs) { return xs.reduce(function (a, b) { return a + b; }, 0) / xs.length; }
   function variance(xs) {
@@ -338,6 +348,16 @@
     var i = (sorted.length - 1) * q;
     var lo = Math.floor(i), hi = Math.ceil(i);
     return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+  }
+  var _randnSpare = null;
+  function randn() {
+    if (_randnSpare !== null) { var v = _randnSpare; _randnSpare = null; return v; }
+    var u = 0, w = 0;
+    while (u === 0) u = Math.random();
+    while (w === 0) w = Math.random();
+    var r = Math.sqrt(-2 * Math.log(u)), t = 2 * Math.PI * w;
+    _randnSpare = r * Math.sin(t);
+    return r * Math.cos(t);
   }
 
   function factorModel() {
@@ -353,7 +373,8 @@
     });
     var rv = R.VOO, mv = mean(rv);
     var den = rv.reduce(function (a, x) { return a + (x - mv) * (x - mv); }, 0);
-    var beta = {}, resid = {}, residVar = {};
+    var sdV = Math.sqrt(den / (rv.length - 1));
+    var beta = {}, resid = {}, residVar = {}, corr = {};
     syms.forEach(function (s) {
       var rk = R[s], mk = mean(rk);
       var b = rk.reduce(function (a, v, i) { return a + (rv[i] - mv) * (v - mk); }, 0) / den;
@@ -362,9 +383,11 @@
       var me = mean(e);
       resid[s] = e.map(function (v) { return v - me; });
       residVar[s] = variance(resid[s]);
+      var sdS = Math.sqrt(variance(rk));
+      corr[s] = rk.reduce(function (a, v, i) { return a + (rv[i] - mv) * (v - mk); }, 0) / ((rk.length - 1) * sdV * sdS);
     });
     return {
-      syms: syms, beta: beta, resid: resid, residVar: residVar,
+      syms: syms, beta: beta, resid: resid, residVar: residVar, corr: corr,
       rfMonthly: mean(R.SGOV), nMonths: rv.length,
       lastVOO: S.VOO[S.VOO.length - 1]
     };
@@ -396,47 +419,117 @@
     if (Math.abs(total - 100) > 0.01) return null;
     return w;
   }
-  function readInitial() {
-    var v = parseFloat((document.getElementById('initial') || {}).value);
-    return (isNaN(v) || v <= 0) ? 10000 : v;
+  // The forecast starts where history ends: the backtest's final
+  // value, as displayed. It already reflects the current weights,
+  // initial amount, and time range.
+  function readStartValue() {
+    var el = document.getElementById('finalValue');
+    if (!el) return null;
+    var v = parseFloat(String(el.textContent || '').replace(/[^0-9.]/g, ''));
+    return (isNaN(v) || v <= 0) ? null : v;
+  }
+  function forecastDates() {
+    var out = [], y = 2026, m = 10; // data through Oct 2026
+    for (var t = 0; t <= N_MONTHS; t++) {
+      out.push(y + '-' + String(m).padStart(2, '0'));
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    return out;
   }
 
-  function runProjection() {
+  function runForecast() {
     var st = projState;
     if (!st || !st.fm || !st.spx) return null;
     var w = readWeights();
     if (!w) return { weightsOk: false };
+    var start = readStartValue();
+    if (!start) return { weightsOk: false };
     var fm = st.fm, spx = st.spx;
-    var rf = fm.rfMonthly * 2; // two months, Oct 31 -> Dec 31
+    var rfM = fm.rfMonthly;
+    var muM = spx.E / 2, sdM = spx.SD / Math.sqrt(2);
     var betaP = 0;
     fm.syms.forEach(function (s) { betaP += (w[s] || 0) * fm.beta[s]; });
     var cum = [], acc = 0;
     spx.bands.forEach(function (b) { acc += b.p; cum.push(acc); });
-    var sims = [];
-    for (var n = 0; n < N_SIMS; n++) {
-      var u = Math.random(), bi = 0;
-      while (bi < cum.length - 1 && u > cum[bi]) bi++;
-      var m = Math.floor(Math.random() * fm.nMonths);
-      var eps = 0;
-      fm.syms.forEach(function (s) { if (w[s]) eps += w[s] * fm.resid[s][m]; });
-      sims.push(rf + betaP * (spx.bands[bi].r - rf) + eps);
+    var med = [], p10 = [], p90 = [], medDd = [];
+    var finalRets = [];
+    var dates = forecastDates();
+    for (var t = 0; t <= N_MONTHS; t++) {
+      if (t === 0) { med.push(start); p10.push(start); p90.push(start); medDd.push(0); continue; }
     }
-    sims.sort(function (a, b) { return a - b; });
-    var worst = sims.slice(0, Math.floor(N_SIMS * 0.1));
+    // Simulate month by month, keeping all paths' values and peaks.
+    var vals = [], peaks = [], dds = [];
+    for (var n = 0; n < N_SIMS; n++) { vals.push([start]); peaks.push([start]); dds.push([0]); }
+    for (var m = 1; m <= N_MONTHS; m++) {
+      var mVals = [];
+      for (var k = 0; k < N_SIMS; k++) {
+        var rM;
+        if (m === 1) {
+          // Drawn once per path below; placeholder replaced after loop.
+          rM = null;
+        } else if (m === 2) {
+          rM = null;
+        } else {
+          rM = muM + sdM * randn();
+        }
+        mVals.push(rM);
+      }
+      // Months 1-2 share one band draw per path (the market-implied
+      // 2-month block), split with noise so each month keeps vol sdM.
+      if (m === 1 || m === 2) {
+        for (var j = 0; j < N_SIMS; j++) {
+          if (m === 1) {
+            var u = Math.random(), bi = 0;
+            while (bi < cum.length - 1 && u > cum[bi]) bi++;
+            var r2 = spx.bands[bi].r;
+            var z = randn() * sdM / Math.sqrt(2);
+            vals[j]._r2 = r2;
+            vals[j]._r1 = r2 / 2 + z;
+          }
+          mVals[j] = (m === 1) ? vals[j]._r1 : (vals[j]._r2 - vals[j]._r1);
+        }
+      }
+      for (var s = 0; s < N_SIMS; s++) {
+        var mi = Math.floor(Math.random() * fm.nMonths);
+        var eps = 0;
+        fm.syms.forEach(function (sym) { if (w[sym]) eps += w[sym] * fm.resid[sym][mi]; });
+        var rp = rfM + betaP * (mVals[s] - rfM) + eps;
+        var nv = vals[s][m - 1] * (1 + rp);
+        vals[s].push(nv);
+        var pk = Math.max(peaks[s][m - 1], nv);
+        peaks[s].push(pk);
+        dds[s].push(nv / pk - 1);
+        if (m === N_MONTHS) finalRets.push(nv / start - 1);
+      }
+    }
+    for (var tt = 1; tt <= N_MONTHS; tt++) {
+      var col = vals.map(function (v) { return v[tt]; }).sort(function (a, b) { return a - b; });
+      med.push(quantile(col, 0.5)); p10.push(quantile(col, 0.1)); p90.push(quantile(col, 0.9));
+      var dcol = dds.map(function (d) { return d[tt]; }).sort(function (a, b) { return a - b; });
+      medDd.push(quantile(dcol, 0.5));
+    }
+    finalRets.sort(function (a, b) { return a - b; });
     var etfStats = fm.syms.map(function (s) {
       var b = fm.beta[s];
+      var muIm = rfM + b * (muM - rfM);
+      var sigIm = Math.sqrt(b * b * sdM * sdM + fm.residVar[s]);
+      var label;
+      if (s === 'VOO') label = 'Direct';
+      else if (s === 'SGOV' || s === 'BIL') label = 'Rate-based';
+      else label = fm.corr[s] >= 0.7 ? 'Proxy' : 'Provisional';
       return {
         sym: s, weight: w[s] || 0,
-        mean: rf + b * (spx.E - rf),
-        vol: Math.sqrt(b * b * spx.SD * spx.SD + 2 * fm.residVar[s])
+        annRet: Math.pow(1 + muIm, 12) - 1, annVol: sigIm * Math.sqrt(12),
+        corr: fm.corr[s], label: label
       };
     });
     return {
-      weightsOk: true, sims: sims, initial: readInitial(), betaP: betaP, rf: rf,
-      mean: mean(sims), sd: Math.sqrt(variance(sims)),
-      p10: quantile(sims, 0.1), p50: quantile(sims, 0.5), p90: quantile(sims, 0.9),
-      pLoss: sims.filter(function (r) { return r < 0; }).length / N_SIMS,
-      es: mean(worst), etfStats: etfStats
+      weightsOk: true, dates: dates, start: start,
+      med: med, p10: p10, p90: p90, medDd: medDd,
+      portAnnRet: mean(finalRets), portAnnVol: Math.sqrt(variance(finalRets)),
+      pLoss: finalRets.filter(function (r) { return r < 0; }).length / N_SIMS,
+      etfStats: etfStats
     };
   }
 
@@ -456,11 +549,12 @@
     }
     projState = { events: events, fm: fm, spx: spx };
     if (note) {
-      note.textContent = 'Method: S&P 500 Dec-31 close bands, probabilities renormalized (sum ' + (spx.probSum * 100).toFixed(1) +
-        '%); band midpoints assumed, open-ended bands $400 wide. Base S&P level ' + Math.round(spx.base).toLocaleString('en-US') +
-        ' from VOO’s Oct-2026 close x 10.909. Each ETF is a proxy: CAPM-style, beta from 72 months of returns, no historical alpha; residuals bootstrapped by month so ETF correlations are kept. Nothing is projected past Dec 31, 2026 — no market prices a longer horizon.';
+      note.textContent = 'Method. (1) Market-implied: S&P 500 Dec-31, 2026 close bands, probabilities renormalized (sum ' +
+        (spx.probSum * 100).toFixed(1) + '%); band midpoints assumed, open-ended bands $400 wide; base S&P level ' +
+        Math.round(spx.base).toLocaleString('en-US') + ' from VOO’s Oct-2026 close x 10.909; implied 2-month mean ' +
+        (spx.E * 100).toFixed(1) + '%, vol ' + (spx.SD * 100).toFixed(1) + '%. (2) Monthly market (model): monthly mean = implied mean / 2, monthly vol = implied vol / sqrt(2); months 1–2 draw one band return split across the two months, months 3–12 draw from a normal with the same monthly mean and vol. The market prices only Dec 31 — the monthly shape and everything past Dec 31 are model assumptions. (3) ETFs (model): CAPM-style beta from 72 months of returns, no historical alpha; residuals bootstrapped whole months so correlations are kept. Labels: Direct / Proxy (corr with VOO >= 0.70) / Provisional (corr < 0.70) / Rate-based (T-bill yield).';
     }
-    drawProjection();
+    drawForecast();
   }
 
   function drawProjEmpty() {
@@ -476,8 +570,22 @@
     if (tb) tb.innerHTML = '';
   }
 
-  function drawProjection() {
-    var res = runProjection();
+  function drawProjEmpty() {
+    ['polyProjGrowth', 'polyProjDrawdown', 'polyProjScatter'].forEach(function (id) {
+      var c = document.getElementById(id);
+      if (c) { var ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+    });
+    ['polyProjLine', 'polyProjDrawdownLine'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = '—';
+    });
+    var tb = document.querySelector('#polyProjTable tbody');
+    if (tb) tb.innerHTML = '';
+  }
+
+  function drawForecast() {
+    var res = runForecast();
+    lastRes = res;
     if (!res) { drawProjEmpty(); return; }
     if (!res.weightsOk) {
       drawProjEmpty();
@@ -485,161 +593,28 @@
       if (note) note.textContent = 'Weights do not total 100%. Adjust them to 100% to see the projection.';
       return;
     }
-    drawProjGrowth(res);
-    drawProjDrawdown(res);
-    drawProjScatter(res);
-    fillProjTable(res);
-  }
-
-  function projSetupCanvas(c) {
-    var ctx = c.getContext('2d');
-    var dpr = window.devicePixelRatio || 1;
-    var W = c.clientWidth, H = c.clientHeight;
-    c.width = W * dpr; c.height = H * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, W, H);
-    return { ctx: ctx, W: W, H: H };
-  }
-
-  function histogramBins(vals, nBins) {
-    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
-    if (max - min < 1e-9) { max = min + 1e-9; }
-    var width = (max - min) / nBins, bins = [];
-    for (var i = 0; i < nBins; i++) bins.push({ lo: min + i * width, hi: min + (i + 1) * width, n: 0 });
-    vals.forEach(function (v) {
-      var idx = Math.min(nBins - 1, Math.floor((v - min) / width));
-      bins[idx].n++;
-    });
-    return { bins: bins, min: min, max: max, total: vals.length };
-  }
-
-  function drawProjGrowth(res) {
-    var c = document.getElementById('polyProjGrowth');
-    var line = document.getElementById('polyProjLine');
-    if (!c) return;
-    var vals = res.sims.map(function (r) { return res.initial * (1 + r); });
-    var p10v = res.initial * (1 + res.p10), p50v = res.initial * (1 + res.p50), p90v = res.initial * (1 + res.p90);
-    if (line) line.textContent = 'Projected value, Dec 31, 2026 — median $' + Math.round(p50v).toLocaleString('en-US') +
-      ' (' + (res.p50 * 100).toFixed(1) + '%), 10th percentile $' + Math.round(p10v).toLocaleString('en-US') +
-      ' (' + (res.p10 * 100).toFixed(1) + '%), 90th percentile $' + Math.round(p90v).toLocaleString('en-US') +
-      ' (' + (res.p90 * 100).toFixed(1) + '%). Chance of a loss: ' + (res.pLoss * 100).toFixed(0) + '%.';
-    var setup = projSetupCanvas(c), ctx = setup.ctx, W = setup.W, H = setup.H;
-    var hist = histogramBins(vals, 36);
-    var maxN = Math.max.apply(null, hist.bins.map(function (b) { return b.n; }));
-    var padL = 8, padR = 8, padT = 14, padB = 26;
-    var bw = (W - padL - padR) / hist.bins.length;
-    var y = function (n) { return padT + (1 - n / (maxN || 1)) * (H - padT - padB); };
-    var xv = function (v) { return padL + ((v - hist.min) / (hist.max - hist.min || 1)) * (W - padL - padR); };
-    ctx.fillStyle = '#fff';
-    hist.bins.forEach(function (b, i) {
-      if (!b.n) return;
-      ctx.fillRect(padL + i * bw + 1, y(b.n), bw - 2, H - padB - y(b.n));
-    });
-    ctx.strokeStyle = '#888'; ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
-    [hist.min, (hist.min + hist.max) / 2, hist.max].forEach(function (v) {
-      ctx.fillText('$' + Math.round(v).toLocaleString('en-US'), Math.min(xv(v), W - 70), H - 8);
-    });
-    // Today, p10, median, p90.
-    var marks = [
-      { v: res.initial, label: 'today', color: '#888' },
-      { v: p10v, label: 'p10', color: '#fff' },
-      { v: p50v, label: 'median', color: '#fff' },
-      { v: p90v, label: 'p90', color: '#fff' }
-    ];
-    marks.forEach(function (mk) {
-      ctx.strokeStyle = mk.color; ctx.lineWidth = mk.color === '#fff' ? 2 : 1;
-      ctx.beginPath(); ctx.moveTo(xv(mk.v), padT); ctx.lineTo(xv(mk.v), H - padB); ctx.stroke();
-      ctx.fillStyle = mk.color;
-      ctx.fillText(mk.label, Math.min(xv(mk.v) + 3, W - 50), padT + 10);
-    });
-    ctx.lineWidth = 1;
-    c._hist = { bins: hist.bins, total: hist.total, fmt: function (b) { return '$' + Math.round((b.lo + b.hi) / 2).toLocaleString('en-US'); } };
-  }
-
-  function drawProjDrawdown(res) {
-    var c = document.getElementById('polyProjDrawdown');
-    var line = document.getElementById('polyProjDrawdownLine');
-    if (!c) return;
-    if (line) line.textContent = 'Chance of a loss by Dec 31: ' + (res.pLoss * 100).toFixed(0) + '%. 10th percentile return: ' +
-      (res.p10 * 100).toFixed(1) + '%. Average of the worst 10% of outcomes: ' + (res.es * 100).toFixed(1) + '%.';
-    var setup = projSetupCanvas(c), ctx = setup.ctx, W = setup.W, H = setup.H;
-    var vals = res.sims.map(function (r) { return r * 100; });
-    var hist = histogramBins(vals, 36);
-    var maxN = Math.max.apply(null, hist.bins.map(function (b) { return b.n; }));
-    var padL = 8, padR = 8, padT = 14, padB = 26;
-    var bw = (W - padL - padR) / hist.bins.length;
-    var y = function (n) { return padT + (1 - n / (maxN || 1)) * (H - padT - padB); };
-    var xv = function (v) { return padL + ((v - hist.min) / (hist.max - hist.min || 1)) * (W - padL - padR); };
-    // Shade the loss region.
-    if (hist.min < 0) {
-      ctx.fillStyle = '#222';
-      ctx.fillRect(padL, padT, Math.max(0, xv(0) - padL), H - padT - padB);
-    }
-    ctx.fillStyle = '#fff';
-    hist.bins.forEach(function (b, i) {
-      if (!b.n) return;
-      ctx.fillRect(padL + i * bw + 1, y(b.n), bw - 2, H - padB - y(b.n));
-    });
-    ctx.strokeStyle = '#888'; ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
-    [hist.min, 0, hist.max].forEach(function (v) {
-      ctx.fillText(v.toFixed(1) + '%', Math.min(Math.max(xv(v), padL), W - 52), H - 8);
-    });
-    [{ v: res.p10 * 100, label: 'p10' }, { v: res.p50 * 100, label: 'median' }].forEach(function (mk) {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(xv(mk.v), padT); ctx.lineTo(xv(mk.v), H - padB); ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.fillText(mk.label, Math.min(xv(mk.v) + 3, W - 50), padT + 10);
-    });
-    ctx.lineWidth = 1;
-    c._hist = { bins: hist.bins, total: hist.total, fmt: function (b) { return ((b.lo + b.hi) / 2).toFixed(1) + '%'; } };
-  }
-
-  function drawProjScatter(res) {
-    var c = document.getElementById('polyProjScatter');
-    if (!c) return;
-    var setup = projSetupCanvas(c), ctx = setup.ctx, W = setup.W, H = setup.H;
+    var dates = res.dates;
+    var medPts = dates.map(function (d, i) { return { date: d, value: res.med[i] }; });
+    var band = dates.map(function (d, i) { return { lo: res.p10[i], hi: res.p90[i] }; });
+    drawLineChart(document.getElementById('polyProjGrowth'), medPts, { fmt: fmtMoney, lastDot: true, band: band });
+    var ddPts = dates.map(function (d, i) { return { date: d, dd: res.medDd[i] }; });
+    drawLineChart(document.getElementById('polyProjDrawdown'), ddPts, { get: function (p) { return p.dd; }, fmt: fmtPctPlain, zeroTop: true });
     var pts = res.etfStats.map(function (e) {
-      return { name: e.sym, x: e.vol * 100, y: e.mean * 100, w: e.weight, kind: 'etf' };
+      return { name: e.sym, vol: e.annVol, ann: e.annRet, kind: 'etf', weight: e.weight };
     });
-    pts.push({ name: 'Your portfolio', x: res.sd * 100, y: res.mean * 100, w: 1, kind: 'current' });
-    var padL = 56, padR = 14, padT = 14, padB = 30;
-    var xMax = Math.max.apply(null, pts.map(function (p) { return p.x; })) * 1.15 || 1;
-    var yMin = Math.min.apply(null, pts.map(function (p) { return p.y; }));
-    var yMax = Math.max.apply(null, pts.map(function (p) { return p.y; }));
-    var pad = (yMax - yMin) * 0.2 || 1;
-    yMin -= pad; yMax += pad;
-    var x = function (v) { return padL + (v / xMax) * (W - padL - padR); };
-    var y = function (v) { return padT + (1 - (v - yMin) / (yMax - yMin || 1)) * (H - padT - padB); };
-    ctx.strokeStyle = '#222'; ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
-    for (var i = 0; i <= 5; i++) {
-      var xv = xMax * i / 5;
-      ctx.beginPath(); ctx.moveTo(x(xv), padT); ctx.lineTo(x(xv), H - padB); ctx.stroke();
-      ctx.fillText(xv.toFixed(1) + '%', x(xv) - 14, H - 10);
-    }
-    for (var j = 0; j <= 4; j++) {
-      var yv = yMin + (yMax - yMin) * j / 4;
-      ctx.beginPath(); ctx.moveTo(padL, y(yv)); ctx.lineTo(W - padR, y(yv)); ctx.stroke();
-      ctx.fillText(yv.toFixed(1) + '%', 4, y(yv) + 4);
-    }
-    if (yMin < 0 && yMax > 0) {
-      ctx.strokeStyle = '#555'; ctx.beginPath(); ctx.moveTo(padL, y(0)); ctx.lineTo(W - padR, y(0)); ctx.stroke();
-    }
-    ctx.fillStyle = '#888';
-    ctx.fillText('Projected volatility (Dec 31) →', W - 210, H - 10);
-    pts.forEach(function (p) { p.px = x(p.x); p.py = y(p.y); });
-    pts.forEach(function (p) {
-      if (p.kind === 'current') {
-        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.px, p.py, 8, 0, Math.PI * 2); ctx.fill();
-      } else {
-        var r = 3 + 9 * Math.sqrt(p.w);
-        ctx.fillStyle = '#fff'; ctx.fillRect(p.px - r / 2, p.py - r / 2, r, r);
-      }
-    });
-    ctx.fillStyle = '#eee'; ctx.font = '11px sans-serif';
-    pts.forEach(function (p) {
-      ctx.fillText(p.name, Math.min(p.px + 10, W - 90), p.py - 8);
-    });
-    c._polyScatterPoints = pts;
+    pts.push({ name: 'Your portfolio', vol: res.portAnnVol, ann: res.portAnnRet, kind: 'current' });
+    drawScatterChart(document.getElementById('polyProjScatter'), pts);
+    var line = document.getElementById('polyProjLine');
+    if (line) line.textContent = 'Starting ' + fmtMoney(res.start) + ' (Oct 2026). Projected value in Oct 2027 — median ' +
+      fmtMoney(res.med[N_MONTHS]) + ' (' + fmtPct(res.med[N_MONTHS] / res.start - 1) + '), 10th percentile ' +
+      fmtMoney(res.p10[N_MONTHS]) + ', 90th percentile ' + fmtMoney(res.p90[N_MONTHS]) +
+      '. Chance of ending below today: ' + (res.pLoss * 100).toFixed(0) + '%.';
+    var deepest = Math.min.apply(null, res.medDd);
+    var deepMonth = res.dates[res.medDd.indexOf(deepest)];
+    var dl = document.getElementById('polyProjDrawdownLine');
+    if (dl) dl.textContent = 'Median projected drawdown: deepest ' + fmtPct(deepest) + ' in ' + deepMonth +
+      ', ending at ' + fmtPct(res.medDd[N_MONTHS]) + '. Drawdown is value / running peak − 1, computed per path, then the median.';
+    fillProjTable(res);
   }
 
   function fillProjTable(res) {
@@ -650,63 +625,68 @@
     rows.forEach(function (e) {
       var tr = document.createElement('tr');
       tr.innerHTML = '<td><strong>' + e.sym + '</strong></td><td>' + (e.weight * 100).toFixed(0) + '%</td>' +
-        '<td>' + (e.mean * 100).toFixed(1) + '%</td><td>' + (e.vol * 100).toFixed(1) + '%</td>' +
-        '<td>Proxy (beta-mapped)</td>';
+        '<td>' + fmtPct(e.annRet) + '</td><td>' + fmtPctPlain(e.annVol) + '</td>' +
+        '<td>' + e.label + (e.label === 'Direct' || e.label === 'Rate-based' ? '' : ' · corr ' + e.corr.toFixed(2)) + '</td>';
       tb.appendChild(tr);
     });
     var tr = document.createElement('tr');
     tr.innerHTML = '<td><strong>Your portfolio</strong></td><td>100%</td>' +
-      '<td><strong>' + (res.mean * 100).toFixed(1) + '%</strong></td><td><strong>' + (res.sd * 100).toFixed(1) + '%</strong></td>' +
+      '<td><strong>' + fmtPct(res.portAnnRet) + '</strong></td><td><strong>' + fmtPctPlain(res.portAnnVol) + '</strong></td>' +
       '<td>Portfolio (correlation-aware)</td>';
     tb.appendChild(tr);
   }
 
   function projHoverSetup() {
-    function histHover(canvasId, hoverId) {
-      var cv = document.getElementById(canvasId);
-      if (!cv) return;
-      cv.addEventListener('mousemove', function (e) {
-        var h = cv._hist;
-        if (!h) return;
-        var rect = e.target.getBoundingClientRect();
-        var idx = Math.floor(((e.clientX - rect.left) / rect.width) * h.bins.length);
-        var b = h.bins[Math.max(0, Math.min(h.bins.length - 1, idx))];
-        document.getElementById(hoverId).textContent =
-          h.fmt(b) + ': ' + b.n + ' of ' + h.total + ' paths (' + (b.n / h.total * 100).toFixed(1) + '%).';
-      });
-    }
-    histHover('polyProjGrowth', 'polyProjGrowthHover');
-    histHover('polyProjDrawdown', 'polyProjDrawdownHover');
+    var g = document.getElementById('polyProjGrowth');
+    if (g) g.addEventListener('mousemove', function (e) {
+      if (!lastRes || !lastRes.weightsOk) return;
+      var rect = e.target.getBoundingClientRect();
+      var i = Math.round(((e.clientX - rect.left) / rect.width) * N_MONTHS);
+      i = Math.max(0, Math.min(N_MONTHS, i));
+      document.getElementById('polyProjGrowthHover').textContent =
+        lastRes.dates[i] + ': median ' + fmtMoney(lastRes.med[i]) +
+        ' (10th–90th: ' + fmtMoney(lastRes.p10[i]) + ' – ' + fmtMoney(lastRes.p90[i]) + ')';
+    });
+    var d = document.getElementById('polyProjDrawdown');
+    if (d) d.addEventListener('mousemove', function (e) {
+      if (!lastRes || !lastRes.weightsOk) return;
+      var rect = e.target.getBoundingClientRect();
+      var i = Math.round(((e.clientX - rect.left) / rect.width) * N_MONTHS);
+      i = Math.max(0, Math.min(N_MONTHS, i));
+      document.getElementById('polyProjDrawdownHover').textContent =
+        lastRes.dates[i] + ': ' + fmtPct(lastRes.medDd[i]) + ' (median drawdown)';
+    });
     var sc = document.getElementById('polyProjScatter');
     if (sc) sc.addEventListener('mousemove', function (e) {
-      var pts = sc._polyScatterPoints || [];
+      var pts = sc._scatterPoints || [];
       if (!pts.length) return;
       var rect = e.target.getBoundingClientRect();
       var mx = (e.clientX - rect.left) / rect.width * e.target.clientWidth;
       var my = (e.clientY - rect.top) / rect.height * e.target.clientHeight;
       var best = null, bestD = 1e9;
       pts.forEach(function (p) {
-        var d = (p.px - mx) * (p.px - mx) + (p.py - my) * (p.py - my);
-        if (d < bestD) { bestD = d; best = p; }
+        if (p.px === undefined) return;
+        var dd = (p.px - mx) * (p.px - mx) + (p.py - my) * (p.py - my);
+        if (dd < bestD) { bestD = dd; best = p; }
       });
       if (best && bestD < 900) {
         document.getElementById('polyProjScatterHover').textContent =
-          best.name + ': projected return ' + best.y.toFixed(1) + '%, volatility ' + best.x.toFixed(1) + '%' +
-          (best.kind === 'etf' ? ', weight ' + (best.w * 100).toFixed(0) + '%' : '');
+          best.name + ': projected volatility ' + fmtPctPlain(best.vol) + ', projected annualized return ' + fmtPct(best.ann);
       }
     });
-    window.addEventListener('resize', drawProjection);
+    window.addEventListener('resize', function () { if (projState) drawForecast(); });
   }
 
   function bindProjInputs() {
+    function soon() { setTimeout(function () { if (projState) drawForecast(); }, 0); }
     var w = document.getElementById('weights');
-    if (w) w.addEventListener('input', function () { if (projState) drawProjection(); });
+    if (w) w.addEventListener('input', soon);
     var pr = document.getElementById('presetRow');
-    if (pr) pr.addEventListener('click', function () {
-      setTimeout(function () { if (projState) drawProjection(); }, 0);
-    });
+    if (pr) pr.addEventListener('click', soon);
     var init = document.getElementById('initial');
-    if (init) init.addEventListener('input', function () { if (projState) drawProjection(); });
+    if (init) init.addEventListener('input', soon);
+    var rr = document.getElementById('rangeRow');
+    if (rr) rr.addEventListener('click', soon);
   }
 
   function init() {
