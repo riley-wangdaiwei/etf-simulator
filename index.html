@@ -85,8 +85,21 @@
     </table>
     <p class="note" id="instSummary">Loading…</p>
 
+    <h3>ETF mapping</h3>
+    <p class="note">Which forecast asset class each ETF is matched to, and whether the match is direct or a labelled proxy. Hover a row for the mapping note.</p>
+    <table>
+      <thead><tr><th>ETF</th><th>Benchmark</th><th>Forecast asset class</th><th>Mapping</th><th>Confidence</th></tr></thead>
+      <tbody id="instMappingBody"></tbody>
+    </table>
+
+    <h3>Source register</h3>
+    <table>
+      <thead><tr><th>Institution</th><th>Report</th><th>Published</th><th>Verification</th><th>Link</th></tr></thead>
+      <tbody id="instSourcesBody"></tbody>
+    </table>
+
     <h3>Import data</h3>
-    <p class="note">Upload the four CSV files one at a time. Each file is validated and previewed before anything is imported, and importing one file never touches the other three. An upload is a preview on this device only — to make a file the site's saved data, send it to Cléo for the repo.</p>
+    <p class="note">Upload the five CSV files one at a time. Each file is validated and previewed before anything is imported, and importing one file never touches the other files. An upload is a preview on this device only — to make a file the site's saved data, send it to Cléo for the repo.</p>
     <div class="inst-upload">
       <p><strong>asset_forecasts.csv</strong> — expected returns, volatility, asset classes, forecast horizons.</p>
       <input type="file" id="instFile-asset_forecasts" accept=".csv,text/csv">
@@ -111,12 +124,18 @@
       <div id="instPreview-source_register"></div>
       <div class="btn-row"><button id="instImport-source_register" type="button" disabled>Import source_register.csv</button></div>
     </div>
+    <div class="inst-upload">
+      <p><strong>etf_mapping.csv</strong> — ETF to forecast asset class: mapping type and confidence.</p>
+      <input type="file" id="instFile-etf_mapping" accept=".csv,text/csv">
+      <div id="instPreview-etf_mapping"></div>
+      <div class="btn-row"><button id="instImport-etf_mapping" type="button" disabled>Import etf_mapping.csv</button></div>
+    </div>
 
     <h3>Forecast horizon</h3>
     <div class="btn-row" id="instCohortRow"></div>
 
     <h3>1. Institutional Asset Outlook</h3>
-    <p class="note">Each point is one institution × asset class × horizon. Only forecasts that supply both a return and a volatility are plotted; the rest are listed below, not plotted. Hover over a point for the institution, report, dates, horizon, currency, basis, and source link.</p>
+    <p class="note">Each point is one institution × asset class × horizon. Only verified (VERIFIED_PRIMARY) total-return forecasts that supply both a return and a volatility are plotted; the rest are listed below, not plotted. Hover over a point for the institution, report, dates, horizon, currency, basis, and source link.</p>
     <canvas id="instOutlook" width="720" height="340"></canvas>
     <p class="note" id="instOutlookHover">Hover near a point to see its expected return and volatility.</p>
     <p class="note" id="instOutlookDetail"></p>
@@ -131,6 +150,18 @@
     <table>
       <thead><tr><th>Institution</th><th>Asset class</th><th>View</th><th>Report</th></tr></thead>
       <tbody id="instViewsBody"></tbody>
+    </table>
+    <h3>Forecasts awaiting verification</h3>
+    <p class="note">Rows marked NEEDS_VERIFICATION (or another non-primary status) are not plotted until verified — for example the BlackRock asset table, whose 5-year / 10-year horizon is unresolved.</p>
+    <table>
+      <thead><tr><th>Institution</th><th>Asset class</th><th>Expected return</th><th>Status</th><th>Report</th></tr></thead>
+      <tbody id="instUnverifiedBody"></tbody>
+    </table>
+    <h3>Index price targets (not total returns)</h3>
+    <p class="note">Index level targets and price returns exclude dividends and are not total-return forecasts. No return is derived from them.</p>
+    <table>
+      <thead><tr><th>Institution</th><th>Asset class</th><th>Target level</th><th>Target date</th><th>Report</th></tr></thead>
+      <tbody id="instPriceTargetBody"></tbody>
     </table>
 
     <h3>2. Portfolio Risk–Return Comparison</h3>
@@ -162,7 +193,7 @@
     <p>Drawdown recovery: for the worst drawdown, the peak is the highest portfolio value before the trough, the recovery date is the first month after the trough when the value reaches that peak again, and “not yet recovered” means it had not reached it by the end of the period.</p>
     <p id="dataNote">Data: month-end adjusted closes (including reinvested dividends), see data.js. Past performance does not predict future results; taxes, trading costs, and inflation are not included.</p>
     <p>Why QQQM and SGOV have shorter histories: QQQM launched in October 2020 and SGOV in May 2020, so the common starting point for all thirteen ETFs is October 2020. “All” therefore covers about 6 years, not decades. A longer history, using proxy indices or older ETFs, is a possible next step.</p>
-    <p>Institutional forecasts: the analyzer reads only the four CSV files described in the Data status section (asset_forecasts, tactical_views, scenario_assumptions, source_register). Blank values mean “not supplied”, never zero. Forecasts are grouped by horizon, currency, return definition, and gross/net before anything is compared; incompatible forecasts are never averaged. Sector ETFs use a broad-equity proxy only when no sector forecast exists, and the proxy is labelled wherever it appears. Historical prices are used only for the clearly labelled historical covariance proxy in chart 2 — never as a forecast.</p>
+    <p>Institutional forecasts: the analyzer reads only the five CSV files described in the Data status section (asset_forecasts, tactical_views, scenario_assumptions, source_register, etf_mapping). Blank values mean “not supplied”, never zero. Forecasts are grouped by horizon, currency, return definition, and gross/net before anything is compared; incompatible forecasts are never averaged. Charts plot VERIFIED_PRIMARY total-return forecasts only; unverified rows and index price targets are listed separately and never plotted. Sector ETFs use a broad-equity proxy only when no sector forecast exists, and the proxy is labelled wherever it appears. Historical prices are used only for the clearly labelled historical covariance proxy in chart 2 — never as a forecast.</p>
   </section>
 </main>
 
@@ -172,6 +203,6 @@
 
 <script src="data.js"></script>
 <script src="app.js?v=2"></script>
-<script src="institutional.js?v=1"></script>
+<script src="institutional.js?v=2"></script>
 </body>
 </html>

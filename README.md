@@ -17,16 +17,21 @@ Black background, white text, left-aligned, following the habit of past pages (V
 
 ## Institutional Forecast Analyzer
 
-Replaced the Polymarket Outlook panel on 2026-11-13. The forward-looking section now runs only on published institutional research supplied as four CSV files (see `institutional_forecast_agent_instructions.md` for the source spec):
+Replaced the Polymarket Outlook panel on 2026-11-13. The forward-looking section now runs only on published institutional research supplied as five CSV files (see `institutional_forecast_agent_instructions.md` for the source spec — the real files use their own column names, mapped to the spec's vocabulary in code):
 
 - `asset_forecasts.csv` — expected returns, volatility, asset classes, forecast horizons.
 - `tactical_views.csv` — short-term views (Overweight / Neutral / Underweight).
 - `scenario_assumptions.csv` — macro scenarios and expected market impacts.
 - `source_register.csv` — report sources, publication dates, URLs, verification status.
+- `etf_mapping.csv` — ETF to forecast asset class: mapping type and confidence.
 
 The analyzer (code in `institutional.js`) has three views: (1) Institutional Asset Outlook — a risk–return scatter, one point per institution × asset class × horizon, plotted only when both a return and a volatility are supplied, with a return-only list and a separate qualitative-views table; (2) Portfolio Risk–Return Comparison — expected return for the current weights and each preset, per institution, with covered-weight disclosure and the range across institutions (a range, not a confidence interval); portfolio volatility is “not available” unless a compatible covariance matrix is supplied, with an optional, clearly labelled historical covariance proxy (72 months, 2020-10–2026-10); (3) Scenario Stress Test — a qualitative exposure matrix from published scenario commentary, numeric impact only when the institution publishes one.
 
-Rules enforced in code: blank means “not supplied”, never zero; forecasts are grouped by horizon, currency, return definition, and gross/net before any comparison; incompatible forecasts are never averaged; sector ETFs fall back to broad US equity only as a labelled proxy; the four files are imported one at a time, each previewed (counts, rejections, conflicts, and the exact replace-diff) before import, and importing one file never touches the other three. The site loads the four files from the repo root when present; until they exist it shows an honest empty state and the next documents needed. Uploads in the browser are a preview on that device only.
+Rules enforced in code: blank means “not supplied”, never zero; forecasts are grouped by horizon, currency, return definition, and gross/net before any comparison; incompatible forecasts are never averaged; sector ETFs fall back to broad US equity only as a labelled proxy; the five files are imported one at a time, each previewed (counts, rejections, conflicts, and the exact replace-diff) before import, and importing one file never touches the others. The site loads the five files from the repo root when present; until they exist it shows an honest empty state and the next documents needed. Uploads in the browser are a preview on that device only.
+
+Verification: charts plot VERIFIED_PRIMARY total-return forecasts only. NEEDS_VERIFICATION rows (e.g. the BlackRock asset table, whose 5-year / 10-year horizon is unresolved) are listed separately and never plotted. Index price targets (S&P 500 8,700 / 8,400 / 8,300 and others) are price returns excluding dividends — listed separately, no return derived from them. Source lookup matches the register exactly first, then by normalized title within the same institution; unmatched citations are listed in the ingestion report. The ETF map comes from `etf_mapping.csv` when present: VOO is direct only for State Street S&P 500 rows, VXUS direct only for Vanguard, QQQM is a labelled growth proxy, XLV/XLE have no sector forecast and use a labelled broad-market proxy. No correlation matrix is supplied by any institution, so institutional portfolio volatility is “not available”.
+
+Current data (2026-11-13): 150 asset-forecast rows, 50 tactical views, 25 scenario rows, 13 sources, 7 ETF mappings. Gaps preserved: no forward-looking correlations, no numeric sector forecasts, no Nasdaq-100 forecast, 94 of 150 forecast rows have no volatility.
 
 The old Polymarket code (`polymarket.js`, live Gamma API, 12-month Monte Carlo projection) was removed with the panel; the historical backtest and the Crisis Scenario Analysis backup are untouched. A record of the removed forecast method lives in the local-only `FUTURE_CALCULATIONS.md` (not in the repo).
 

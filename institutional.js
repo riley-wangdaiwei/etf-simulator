@@ -76,8 +76,107 @@
   // known columns it carries; record_type may be omitted and is then
   // inferred from the file. Columns outside the documented vocabulary
   // are never silently renamed — they are reported in the preview.
-  var KNOWN_COLUMNS = EXPECTED_COLUMNS.concat(['record_type']);
+  //
+  // 2026-11-13 update: the real files the generating AI produced use
+  // DIFFERENT column names (forecast_horizon, expected_volatility_pct,
+  // return_type, gross_or_net, verification_status, scenario_name,
+  // affected_asset_class, numeric_return_impact_pct, original_source_url,
+  // ...). The alias table below maps the real schema onto the canonical
+  // names above, so both schemas ingest. KNOWN_IGNORED lists columns
+  // that are recognised but deliberately never used for a return
+  // (index target levels, scenario levels) — no return is derived
+  // from them.
+  var HEADER_ALIASES = {
+    'forecast_horizon': 'horizon_label',
+    'expected_volatility_pct': 'volatility_pct',
+    'return_type': 'return_basis',
+    'gross_or_net': 'gross_net',
+    'source_page': 'source_page',
+    'source_quote_or_table_reference': 'source_ref',
+    'verification_status': 'verification_status',
+    'confidence_or_percentile': 'confidence',
+    'scenario_name': 'scenario',
+    'scenario_description': 'scenario_description',
+    'affected_asset_class': 'asset_class',
+    'affected_risk_factor': 'risk_factor',
+    'expected_direction': 'view_direction',
+    'numeric_return_impact_pct': 'impact_return_pct',
+    'numeric_volatility_impact_pct': 'impact_vol_pct',
+    'numeric_rate_change_bps': 'impact_rate_bps',
+    'numeric_inflation_change_pct': 'impact_inflation_pct',
+    'original_source_url': 'source_url',
+    'investment_thesis': 'thesis',
+    'positive_factors': 'factors_pos',
+    'negative_factors': 'factors_neg',
+    'key_risks': 'key_risks',
+    'notes': 'source_notes',
+    'report_type': 'report_type',
+    'forecast_horizons_covered': 'horizons_covered',
+    'pdf_url': 'pdf_url',
+    'date_accessed': 'date_accessed',
+    'relevant_pages_or_tables': 'relevant_pages',
+    'data_extracted': 'data_extracted',
+    'limitations': 'limitations'
+  };
+  var KNOWN_IGNORED = ['record_id', 'target_level', 'target_date',
+    'scenario_level_value', 'baseline_level_value', 'value_unit'];
+  var KNOWN_COLUMNS = EXPECTED_COLUMNS.concat(['record_type'],
+    Object.keys(HEADER_ALIASES), KNOWN_IGNORED);
   var REQUIRED_COLUMNS = ['institution'];
+
+  // Free-text fields in the real files need grouping before they can
+  // be used as cohort keys — otherwise every spelling is its own
+  // cohort. The raw text is kept on the record for display; only the
+  // normalized token groups rows. Nothing is averaged across groups.
+  function normReturnBasis(raw) {
+    var s = (raw || '').toLowerCase();
+    if (/arithmetic/.test(s)) return 'arithmetic';
+    if (/price return/.test(s)) return 'price return (excl. dividends)';
+    if (/index level/.test(s)) return 'index level (no % return)';
+    if (/currency change/.test(s)) return 'currency change';
+    if (/geometric/.test(s)) return 'geometric';
+    return (raw || '').trim().slice(0, 60);
+  }
+  function normCurrency(raw) {
+    var s = (raw || '').trim();
+    if (/^local/i.test(s)) return 'Local';
+    if (/^usd/i.test(s)) return 'USD';
+    return s;
+  }
+  function normGrossNet(raw) {
+    var s = (raw || '').toLowerCase();
+    if (/gross|no fees/.test(s)) return 'gross';
+    if (/n\/a/.test(s)) return 'n/a';
+    return (raw || '').trim();
+  }
+  // Horizon years arrive as ranges ('10-15', '3-5', '10+', '~1') or
+  // blank (UNRESOLVED). Parse leniently: the leading number groups
+  // the row, the raw string is kept for display. Never rejects a row.
+  function parseHorizonYears(raw) {
+    var s = (raw || '').trim();
+    if (!s) return { years: null, raw: '' };
+    var m = s.match(/(\d+(?:\.\d+)?)/);
+    if (!m) return { years: null, raw: s };
+    return { years: parseFloat(m[1]), raw: s };
+  }
+  function horizonKey(r) {
+    if (r.horizon_years_raw) return r.horizon_years_raw === '10+' ? '10' : r.horizon_years_raw;
+    return r.horizon_label || 'unspecified horizon';
+  }
+  function horizonLabel(r) {
+    var raw = r.horizon_years_raw;
+    if (raw) {
+      var num = parseHorizonYears(raw).years;
+      return raw.replace('-', '–') + (num === 1 ? ' year' : ' years');
+    }
+    return r.horizon_label || 'Unspecified horizon';
+  }
+  function isPriceTarget(r) {
+    return /price return|index level/.test(r.return_basis || '');
+  }
+  function isVerified(r) {
+    return (r.verification_status || '') === 'VERIFIED_PRIMARY';
+  }
 
   function toNum(raw) {
     if (raw === undefined || raw === null) return null;
@@ -121,7 +220,10 @@
       return rep;
     }
     var idx = {};
-    headers.forEach(function (h, i) { idx[h] = i; });
+    headers.forEach(function (h, i) {
+      var canonical = HEADER_ALIASES[h] || h;
+      if (idx[canonical] === undefined) idx[canonical] = i;
+    });
     function col(r, name) { return idx[name] === undefined ? '' : r[idx[name]]; }
     var seen = {};
     parsed.rows.forEach(function (r, ri) {
@@ -132,7 +234,7 @@
         report_title: clean(col(r, 'report_title')),
         publication_date: clean(col(r, 'publication_date')),
         data_as_of_date: clean(col(r, 'data_as_of_date')),
-        horizon_years: toNum(col(r, 'horizon_years')),
+        horizon_years: null, // parsed leniently below (ranges like '10-15')
         horizon_label: clean(col(r, 'horizon_label')),
         asset_class: clean(col(r, 'asset_class')),
         benchmark_index: clean(col(r, 'benchmark_index')),
@@ -152,9 +254,39 @@
         source_notes: clean(col(r, 'source_notes')),
         data_quality: clean(col(r, 'data_quality')),
         verified_on: clean(col(r, 'verified_on')),
+        verification_status: clean(col(r, 'verification_status')),
+        source_page: clean(col(r, 'source_page')),
+        source_ref: clean(col(r, 'source_ref')),
+        confidence: clean(col(r, 'confidence')),
+        scenario_description: clean(col(r, 'scenario_description')),
+        risk_factor: clean(col(r, 'risk_factor')),
+        impact_return_pct: toPct(col(r, 'impact_return_pct')),
+        impact_vol_pct: toPct(col(r, 'impact_vol_pct')),
+        impact_rate_bps: toNum(col(r, 'impact_rate_bps')),
+        impact_inflation_pct: toPct(col(r, 'impact_inflation_pct')),
+        thesis: clean(col(r, 'thesis')),
+        factors_pos: clean(col(r, 'factors_pos')),
+        factors_neg: clean(col(r, 'factors_neg')),
+        key_risks: clean(col(r, 'key_risks')),
+        target_level: toNum(col(r, 'target_level')),
+        target_date: clean(col(r, 'target_date')),
         _line: lineNo,
         _sourceFile: opts.fileLabel || sourceLabel
       };
+      // Normalize grouping fields (raw text kept for display).
+      var hy = parseHorizonYears(col(r, 'horizon_years'));
+      rec.horizon_years = hy.years;
+      rec.horizon_years_raw = hy.raw;
+      rec.return_basis_raw = rec.return_basis;
+      rec.return_basis = normReturnBasis(rec.return_basis);
+      rec.currency_raw = rec.currency;
+      rec.currency = normCurrency(rec.currency);
+      rec.gross_net_raw = rec.gross_net;
+      rec.gross_net = normGrossNet(rec.gross_net);
+      // A scenario row's published numeric impact is its return figure.
+      if (rec.expected_return === null && rec.impact_return_pct !== null) {
+        rec.expected_return = rec.impact_return_pct;
+      }
       // --- validation ---
       if (!rec.institution) { rep.rejected++; rep.rejectedRows.push({ line: lineNo, reason: 'institution is blank' }); return; }
       if (rec.record_type !== 'return_forecast' && rec.record_type !== 'qualitative_view') {
@@ -170,7 +302,7 @@
         } else { rep.rejected++; rep.rejectedRows.push({ line: lineNo, reason: 'asset_class is blank' }); return; }
       }
       var badNum = null;
-      ['expected_return', 'expected_low', 'expected_high', 'volatility', 'horizon_years'].forEach(function (k) {
+      ['expected_return', 'expected_low', 'expected_high', 'volatility', 'impact_return_pct', 'target_level'].forEach(function (k) {
         if (typeof rec[k] === 'number' && isNaN(rec[k])) badNum = k;
       });
       if (badNum) { rep.rejected++; rep.rejectedRows.push({ line: lineNo, reason: badNum + ' is not a number' }); return; }
@@ -191,12 +323,14 @@
       }
       rec.asset_norm = normalizeAssetClass(rec.asset_class);
       rec.benchmark_norm = normalizeAssetClass(rec.benchmark_index);
-      // --- duplicates / conflicts ---
-      var key = [rec.institution, rec.report_title, rec.asset_norm, rec.horizon_label, rec.record_type, rec.scenario].join('|');
+      // --- duplicates / conflicts (published identity, not the
+      // normalized bucket — see recordKey) ---
+      var key = recordKey(rec);
       if (seen[key]) {
         var prev = seen[key];
         var same = prev.expected_return === rec.expected_return && prev.volatility === rec.volatility &&
-          prev.view_direction === rec.view_direction && prev.expected_low === rec.expected_low && prev.expected_high === rec.expected_high;
+          prev.view_direction === rec.view_direction && prev.view_rating === rec.view_rating &&
+          prev.expected_low === rec.expected_low && prev.expected_high === rec.expected_high;
         if (same) { rep.skipped++; rep.duplicates.push({ line: lineNo, key: key }); }
         else { rep.rejected++; rep.conflicts.push({ line: lineNo, key: key, keptLine: prev._line }); }
         return;
@@ -214,19 +348,55 @@
   // their own lowercased text — they are shown as unmapped, not forced
   // into a bucket.
   // ------------------------------------------------------------------
+  // Order matters: specific patterns first, generic ones last, so
+  // 'Global ex-U.S. equities' does not collapse into 'Global equities'
+  // and 'Global aggregate bonds' does not collapse into 'U.S. aggregate
+  // bonds'. Unknown classes keep their own lowercased text — they are
+  // shown as unmapped, not forced into a bucket.
   var ASSET_ALIASES = [
-    [/s&p\s*500|us large[- ]cap( equity)?|us large cap/i, 'us large-cap equity'],
-    [/nasdaq[- ]?100|us large[- ]cap growth|growth.*tech|technology[- ]heavy/i, 'us large-cap growth / technology-heavy equity'],
+    [/s&p\s*500|u\.?s\.? large[- ]cap( equity)?/i, 'us large-cap equity'],
+    [/nasdaq[- ]?100/i, 'us large-cap growth / technology-heavy equity'],
+    [/global growth equity/i, 'global growth equity'],
+    [/u\.?s\.? growth equity/i, 'us large-cap growth / technology-heavy equity'],
+    [/u\.?s\.? value equity/i, 'us value equity'],
     [/total (us )?stock|us total market/i, 'us total market equity'],
-    [/global|world equity|all country/i, 'global equity'],
-    [/ex[- ]us|international equity|non[- ]us equity|developed markets|emerging markets|developed ex-us|em ex/i, 'ex-us equity'],
-    [/us small[- ]cap|russell ?2000/i, 'us small-cap equity'],
+    [/global ex-?u\.?s\.?/i, 'ex-us equity'],
+    [/developed.*ex-?u\.?s\.?/i, 'developed ex-us equity'],
+    [/emerging-market debt/i, 'emerging-market debt'],
+    [/emerging markets? equities?/i, 'emerging markets equity'],
+    [/ex-?u\.?s\.? equities?|international equities? ex|non-?u\.?s\.? equity/i, 'ex-us equity'],
+    [/international equities?|ex-?u\.?s\.?/i, 'ex-us equity'],
+    [/all country|global.*equit|world equity/i, 'global equity'],
+    [/u\.?s\.? small[- ]cap|russell ?2000/i, 'us small-cap equity'],
+    [/u\.?s\.? mid[- ]cap/i, 'us mid-cap equity'],
     [/dividend/i, 'us dividend equity'],
     [/health ?care/i, 'us healthcare sector'],
     [/financials?/i, 'us financials sector'],
     [/energy/i, 'us energy sector'],
+    [/global ex.*aggregate/i, 'global ex-us aggregate bonds'],
+    [/global aggregate bonds/i, 'global aggregate bonds'],
+    [/global government bonds/i, 'global government bonds'],
+    [/global corporate bonds/i, 'global corporate bonds'],
     [/aggregate|us core bond|us investment grade bond/i, 'us aggregate bonds'],
-    [/cash|t[- ]?bill|treasury bill|short[- ]term treasur/i, 'cash / very short-term treasuries']
+    [/long[- ]term.*treasur/i, 'long-term us treasuries'],
+    [/short[- ]term.*treasur/i, 'short-term us treasuries'],
+    [/intermediate.*treasur/i, 'intermediate us treasuries'],
+    [/u\.?s\.? cash|t[- ]?bill|treasury bill/i, 'cash / very short-term treasuries'],
+    [/treasur/i, 'us government bonds'],
+    [/u\.?s\.? (investment[- ]grade )?corporate bonds?|u\.?s\.? credit/i, 'us investment-grade corporate bonds'],
+    [/high[- ]yield/i, 'us high-yield bonds'],
+    [/u\.?s\.? equities/i, 'us large-cap equity'],
+    [/global reit/i, 'global reits'],
+    [/u\.?s\.? reit/i, 'us reits'],
+    [/commodit/i, 'commodities'],
+    [/\bgold\b/i, 'gold'],
+    [/tips/i, 'us tips'],
+    [/mbs|mortgage-backed/i, 'us mortgage-backed securities'],
+    [/europe|european equities/i, 'european equities'],
+    [/japan/i, 'japanese equities'],
+    [/china equities/i, 'china equities'],
+    [/uk equities|u\.?k\.? gilts/i, 'uk equities'],
+    [/u\.?s\.? dollar/i, 'us dollar']
   ];
   function normalizeAssetClass(raw) {
     var s = clean(raw).toLowerCase();
@@ -263,12 +433,12 @@
   // together.
   // ------------------------------------------------------------------
   function cohortKey(r) {
-    return [r.horizon_label || (r.horizon_years ? r.horizon_years + ' years' : 'unspecified horizon'),
+    return [horizonKey(r),
       r.currency || 'unspecified currency', r.return_basis || 'unspecified basis',
       r.gross_net || 'unspecified gross/net'].join(' | ');
   }
   function cohortLabel(r) {
-    return (r.horizon_label || (r.horizon_years ? r.horizon_years + '-year' : 'Unspecified horizon')) +
+    return horizonLabel(r) +
       ' · ' + (r.currency || '?') + ' · ' + (r.return_basis || '?') + ' · ' + (r.gross_net || '?');
   }
   function buildCohorts(records) {
@@ -287,20 +457,25 @@
   }
 
   // Find the forecast for one ETF inside one cohort. Returns
-  // { rec, via: 'direct' | 'proxy' } or null. Sector ETFs fall back
-  // to broad US equity only as an explicit, labelled proxy.
+  // { recs, via: 'direct' | 'proxy', directInstitutions, proxyNote }
+  // or null. Sector ETFs fall back to broad US equity only as an
+  // explicit, labelled proxy. Directness can be per-institution
+  // (etf_mapping.csv: only State Street rows are direct for VOO,
+  // only Vanguard rows for VXUS) — portfolioExpectedReturn applies
+  // that rule per institution.
   function forecastForETF(cohort, sym) {
-    var m = ETF_MAP[sym];
+    var m = liveETFMap()[sym];
     if (!m) return null;
-    var direct = cohort.forecasts.filter(function (r) {
-      return r.returnMid !== null && (r.asset_norm === m.asset || r.benchmark_norm === m.asset);
-    });
-    if (direct.length) return { recs: direct, via: 'direct' };
-    if (m.fallback) {
-      var prox = cohort.forecasts.filter(function (r) {
-        return r.returnMid !== null && (r.asset_norm === m.fallback || r.benchmark_norm === m.fallback);
+    function matchRecs(assetNorm) {
+      return cohort.forecasts.filter(function (r) {
+        return r.returnMid !== null && (r.asset_norm === assetNorm || r.benchmark_norm === assetNorm);
       });
-      if (prox.length) return { recs: prox, via: 'proxy', proxyNote: 'No ' + m.asset + ' forecast in this cohort; using ' + m.fallback + ' as a proxy.' };
+    }
+    var direct = m.asset ? matchRecs(m.asset) : [];
+    if (direct.length) return { recs: direct, via: m.via || 'direct', directInstitutions: m.directInstitutions || null, proxyNote: m.mappingNote || null };
+    if (m.fallback) {
+      var prox = matchRecs(m.fallback);
+      if (prox.length) return { recs: prox, via: 'proxy', directInstitutions: null, proxyNote: m.mappingNote || ('No ' + m.asset + ' forecast in this cohort; using ' + m.fallback + ' as a proxy.') };
     }
     return null;
   }
@@ -325,7 +500,9 @@
       total += w * avg;
       covered += w;
       used++;
-      if (found.via === 'proxy') proxyUsed.push(sym);
+      var viaInst = found.via;
+      if (viaInst === 'direct' && found.directInstitutions && found.directInstitutions.indexOf(institution) < 0) viaInst = 'proxy';
+      if (viaInst === 'proxy') proxyUsed.push(sym);
     });
     // sleeveReturn = the covered holdings' own expected return
     // (weights renormalized within the covered sleeve, disclosed);
@@ -345,6 +522,7 @@
     { id: 'ai-boom', label: 'AI / technology investment boom', test: /ai.*(boom|investment|buildout|capex)|technology investment boom/i },
     { id: 'ai-disappointment', label: 'AI valuation or earnings disappointment', test: /ai.*(disappoint|valuation|earnings|correction|bubble)/i },
     { id: 'higher-for-longer', label: 'Higher-for-longer interest rates', test: /higher[- ]for[- ]longer|rates? (stay|remain|higher)|rate.*elevated/i },
+    { id: 'risk-premium', label: 'Higher U.S. risk premium', test: /risk premium/i },
     { id: 'recession', label: 'Recession / earnings contraction', test: /recession|earnings contraction|growth slowdown|hard landing/i },
     { id: 'energy-inflation', label: 'Energy supply shock / renewed inflation', test: /energy.*(supply|shock)|renewed inflation|oil (shock|spike)|inflation (shock|resurgence)/i },
     { id: 'usd', label: 'U.S. dollar appreciation or depreciation', test: /dollar|usd|fx| currency/i }
@@ -365,6 +543,7 @@
     var v = (rec.view_rating || '').toLowerCase();
     if (/overweight|positive|bullish/.test(v)) return 'positive';
     if (/underweight|negative|bearish/.test(v)) return 'negative';
+    if (/mixed/.test(v)) return 'mixed';
     if (/neutral|equal/.test(v)) return 'neutral';
     return 'unknown';
   }
@@ -394,9 +573,14 @@
       label: 'source_register.csv', inferType: null, isRegister: true,
       hint: 'Report sources: publication dates, URLs, page references, verification status.',
       needs: ['source_url']
+    },
+    etf_mapping: {
+      label: 'etf_mapping.csv', inferType: null, isMapping: true,
+      hint: 'ETF to forecast asset class: mapping type and confidence.',
+      needs: ['recommended_forecast_asset_class', 'mapping_type']
     }
   };
-  var FILE_ORDER = ['asset_forecasts', 'tactical_views', 'scenario_assumptions', 'source_register'];
+  var FILE_ORDER = ['asset_forecasts', 'tactical_views', 'scenario_assumptions', 'source_register', 'etf_mapping'];
 
   function detectFileKind(filename, headers) {
     var name = (filename || '').toLowerCase();
@@ -405,12 +589,14 @@
     if (/asset[-_ ]?forecast/.test(name)) byName = 'asset_forecasts';
     else if (/tactical/.test(name)) byName = 'tactical_views';
     else if (/scenario/.test(name)) byName = 'scenario_assumptions';
+    else if (/etf[-_ ]?mapping/.test(name)) byName = 'etf_mapping';
     else if (/source[-_ ]?register|sources/.test(name)) byName = 'source_register';
     var byHeaders = null;
-    if (has('scenario')) byHeaders = 'scenario_assumptions';
+    if (has('recommended_forecast_asset_class')) byHeaders = 'etf_mapping';
+    else if (has('scenario_name') || has('scenario')) byHeaders = 'scenario_assumptions';
     else if (has('view_rating') || has('view_direction')) byHeaders = 'tactical_views';
-    else if (has('expected_return_pct') || has('volatility_pct')) byHeaders = 'asset_forecasts';
-    else if (has('source_url') && !has('asset_class') && !has('expected_return_pct')) byHeaders = 'source_register';
+    else if (has('expected_return_pct') || has('volatility_pct') || has('expected_volatility_pct')) byHeaders = 'asset_forecasts';
+    else if ((has('source_url') || has('original_source_url')) && !has('asset_class') && !has('expected_return_pct')) byHeaders = 'source_register';
     return { kind: byName || byHeaders, byName: byName, byHeaders: byHeaders };
   }
 
@@ -430,21 +616,28 @@
     if (parsed.error) { rep.error = parsed.error; return rep; }
     var headers = parsed.headers;
     var known = ['institution', 'report_title', 'publication_date', 'data_as_of_date',
-      'source_url', 'source_notes', 'data_quality', 'verified_on'];
-    rep.unrecognizedColumns = headers.filter(function (h) { return known.indexOf(h) < 0; });
+      'source_url', 'source_notes', 'data_quality', 'verified_on', 'verification_status',
+      'report_type', 'horizons_covered', 'pdf_url', 'date_accessed',
+      'relevant_pages', 'data_extracted', 'limitations'];
+    rep.unrecognizedColumns = headers.filter(function (h) {
+      return known.indexOf(h) < 0 && known.indexOf(HEADER_ALIASES[h] || h) < 0;
+    });
     if (headers.indexOf('institution') < 0 || headers.indexOf('report_title') < 0) {
       rep.error = 'source_register.csv needs institution and report_title columns.';
       return rep;
     }
     var idx = {};
-    headers.forEach(function (h, i) { idx[h] = i; });
+    headers.forEach(function (h, i) {
+      var canonical = HEADER_ALIASES[h] || h;
+      if (idx[canonical] === undefined) idx[canonical] = i;
+    });
     function col(r, name) { return idx[name] === undefined ? '' : r[idx[name]]; }
     var seen = {};
     parsed.rows.forEach(function (r, ri) {
       var lineNo = ri + 2;
       if (!r.length || r.every(function (c) { return String(c).trim() === ''; })) { rep.skipped++; return; }
       var extra = {};
-      headers.forEach(function (h, i) { if (known.indexOf(h) < 0) extra[h] = clean(r[i]); });
+      headers.forEach(function (h, i) { if (known.indexOf(h) < 0 && known.indexOf(HEADER_ALIASES[h] || h) < 0) extra[h] = clean(r[i]); });
       var e = {
         institution: clean(col(r, 'institution')),
         report_title: clean(col(r, 'report_title')),
@@ -454,6 +647,14 @@
         source_notes: clean(col(r, 'source_notes')),
         data_quality: clean(col(r, 'data_quality')),
         verified_on: clean(col(r, 'verified_on')),
+        verification_status: clean(col(r, 'verification_status')),
+        report_type: clean(col(r, 'report_type')),
+        horizons_covered: clean(col(r, 'horizons_covered')),
+        pdf_url: clean(col(r, 'pdf_url')),
+        date_accessed: clean(col(r, 'date_accessed')),
+        relevant_pages: clean(col(r, 'relevant_pages')),
+        data_extracted: clean(col(r, 'data_extracted')),
+        limitations: clean(col(r, 'limitations')),
         extra: extra, _line: lineNo
       };
       if (!e.institution || !e.report_title) {
@@ -484,6 +685,7 @@
     var def = FILE_DEFS[det.kind];
     var rep;
     if (def.isRegister) rep = ingestSourceRegister(text, filename);
+    else if (def.isMapping) rep = ingestETFMapping(text, filename);
     else rep = ingestCSV(text, filename, { inferType: def.inferType, fileLabel: filename, fileKind: det.kind });
     rep.detected = det;
     if (det.byName && det.byHeaders && det.byName !== det.byHeaders) {
@@ -497,12 +699,122 @@
   }
 
   // ------------------------------------------------------------------
+  // ETF mapping file: the documented ETF -> forecast asset class map,
+  // with mapping type and confidence. The analyzer's ETF map is built
+  // from this file when present; the hardcoded ETF_MAP below is only
+  // the fallback for when the file is absent.
+  // ------------------------------------------------------------------
+  function ingestETFMapping(text, sourceLabel) {
+    var rep = {
+      source: sourceLabel, fileKind: 'etf_mapping', imported: 0, rejected: 0, skipped: 0,
+      duplicates: [], conflicts: [], rejectedRows: [], entries: [],
+      warnings: [], error: null, unrecognizedColumns: []
+    };
+    var parsed = parseCSV(text);
+    if (parsed.error) { rep.error = parsed.error; return rep; }
+    var headers = parsed.headers;
+    var known = ['etf', 'fund_name', 'official_benchmark', 'primary_exposure',
+      'recommended_forecast_asset_class', 'mapping_type', 'mapping_confidence',
+      'fund_doc_source', 'verification_status', 'notes'];
+    rep.unrecognizedColumns = headers.filter(function (h) { return known.indexOf(h) < 0; });
+    if (headers.indexOf('etf') < 0 || headers.indexOf('recommended_forecast_asset_class') < 0 ||
+      headers.indexOf('mapping_type') < 0) {
+      rep.error = 'etf_mapping.csv needs etf, recommended_forecast_asset_class and mapping_type columns.';
+      return rep;
+    }
+    var idx = {};
+    headers.forEach(function (h, i) { idx[h] = i; });
+    function col(r, name) { return idx[name] === undefined ? '' : r[idx[name]]; }
+    var seen = {};
+    parsed.rows.forEach(function (r, ri) {
+      var lineNo = ri + 2;
+      if (!r.length || r.every(function (c) { return String(c).trim() === ''; })) { rep.skipped++; return; }
+      var rawType = clean(col(r, 'mapping_type'));
+      var type = /NONE/i.test(rawType) ? 'none' : /^direct/i.test(rawType) ? 'direct' : /proxy/i.test(rawType) ? 'proxy' : 'other';
+      var fc = clean(col(r, 'recommended_forecast_asset_class'));
+      var e = {
+        etf: clean(col(r, 'etf')).toUpperCase(),
+        fund_name: clean(col(r, 'fund_name')),
+        benchmark: clean(col(r, 'official_benchmark')),
+        exposure: clean(col(r, 'primary_exposure')),
+        forecast_class: fc,
+        forecast_class_norm: /NONE/i.test(fc) ? '' : normalizeAssetClass(fc),
+        mapping_type_raw: rawType,
+        mapping_type: type,
+        confidence: clean(col(r, 'mapping_confidence')),
+        fund_doc_source: clean(col(r, 'fund_doc_source')),
+        verification_status: clean(col(r, 'verification_status')),
+        notes: clean(col(r, 'notes')),
+        _line: lineNo
+      };
+      if (!e.etf || !fc) {
+        rep.rejected++; rep.rejectedRows.push({ line: lineNo, reason: 'etf or recommended_forecast_asset_class is blank' }); return;
+      }
+      if (seen[e.etf]) {
+        var prev = seen[e.etf];
+        if (prev.forecast_class === e.forecast_class && prev.mapping_type === e.mapping_type) {
+          rep.skipped++; rep.duplicates.push({ line: lineNo, key: e.etf });
+        } else { rep.rejected++; rep.conflicts.push({ line: lineNo, key: e.etf, keptLine: prev._line }); }
+        return;
+      }
+      seen[e.etf] = e;
+      rep.entries.push(e);
+      rep.imported++;
+    });
+    return rep;
+  }
+
+  // Documented per-institution rules from etf_mapping.csv notes:
+  // VOO — State Street S&P 500 rows are direct; Vanguard 'U.S.
+  // large-cap' (Russell-1000) and JPM rows are proxies. VXUS —
+  // Vanguard Global ex-U.S. is direct; other institutions' ex-U.S.
+  // rows are proxies.
+  var MAPPING_DIRECT_ONLY = {
+    VOO: ['State Street Investment Management'],
+    VXUS: ['Vanguard']
+  };
+  function buildETFMap() {
+    var map = {};
+    Object.keys(ETF_MAP).forEach(function (s) { map[s] = Object.assign({}, ETF_MAP[s]); });
+    var f = state.files.etf_mapping;
+    if (!f || !f.report || !f.report.entries) return map;
+    f.report.entries.forEach(function (e) {
+      var sym = e.etf;
+      if (!map[sym]) map[sym] = { asset: '', benchmark: e.benchmark || '', fallback: 'us large-cap equity' };
+      map[sym].benchmark = e.benchmark || map[sym].benchmark;
+      map[sym].confidence = e.confidence;
+      map[sym].mappingNote = e.notes;
+      map[sym].mappingType = e.mapping_type;
+      if (e.mapping_type === 'none') {
+        map[sym].asset = '';
+        map[sym].via = 'none';
+      } else {
+        map[sym].asset = e.forecast_class_norm || '';
+        map[sym].via = e.mapping_type;
+      }
+      if (MAPPING_DIRECT_ONLY[sym]) map[sym].directInstitutions = MAPPING_DIRECT_ONLY[sym];
+      if (e.mapping_type === 'proxy' || e.mapping_type === 'none') map[sym].fallback = 'us large-cap equity';
+    });
+    return map;
+  }
+  // Rebuilt on every use (7 rows — negligible cost), so a re-imported
+  // mapping file takes effect immediately with no cache to clear.
+  function liveETFMap() { return buildETFMap(); }
+
+  // ------------------------------------------------------------------
   // State: one slot per file. Re-uploading a file replaces ONLY that
   // file's records, and only after the preview shows the diff.
   // ------------------------------------------------------------------
   var state = { files: {}, sources: [], prevSummary: null };
+  // Dedup identity is the PUBLISHED identity (raw asset class +
+  // benchmark + horizon years), not the normalized bucket: two rows
+  // the institution published separately — e.g. Vanguard 'U.S.
+  // equities' (Russell 1000) vs 'U.S. equities (broad market)'
+  // (MSCI), or State Street 'Global equities (ACWI)' vs '(World)' —
+  // are two forecasts, not a conflict, even though they normalize to
+  // the same class.
   var recordKey = function (r) {
-    return [r.institution, r.report_title, r.asset_norm, r.horizon_label, r.record_type, r.scenario].join('|');
+    return [r.institution, r.report_title, r.asset_class, r.benchmark_index, horizonKey(r), r.horizon_years_raw || '', r.record_type, r.scenario].join('|');
   };
   function diffRecords(oldRecs, newRecs) {
     var oldMap = {}, newMap = {};
@@ -531,10 +843,56 @@
     return out;
   }
   function allSources() { return state.sources; }
+  // Source lookup: exact (institution + report_title) first. The
+  // register's titles are often shorter forms of the titles used in
+  // the data files, so a second pass matches within the same
+  // institution on normalized titles (parentheticals stripped) when
+  // one contains the other. Anything still unmatched is listed in
+  // the ingestion report — never silently linked to the wrong report.
+  function normTitle(s) {
+    return (s || '').toLowerCase().replace(/\([^)]*\)/g, '')
+      .replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  // Institution names keep their parentheticals: the data files
+  // sometimes name the reproducing unit in parens, and that is
+  // exactly what identifies the firm ('... (reproduced by Goldman
+  // Sachs Asset Management)').
+  function normInst(s) {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
   function sourceLookup() {
-    var m = {};
-    state.sources.forEach(function (e) { m[e.institution + '|' + e.report_title] = e; });
-    return m;
+    var exact = {}, byInst = {};
+    state.sources.forEach(function (e) {
+      exact[e.institution + '|' + e.report_title] = { entry: e, method: 'exact' };
+      (byInst[e.institution] = byInst[e.institution] || []).push(e);
+    });
+    return {
+      find: function (institution, reportTitle) {
+        var k = institution + '|' + reportTitle;
+        if (exact[k]) return exact[k];
+        var cands = byInst[institution] || [];
+        if (!cands.length) {
+          // The data files sometimes name a longer institution form
+          // (e.g. 'Goldman Sachs Global Investment Research
+          // (reproduced by Goldman Sachs Asset Management)') than
+          // the register ('Goldman Sachs Asset Management'). Accept
+          // a containing institution within the same firm family.
+          var ni = normInst(institution);
+          Object.keys(byInst).forEach(function (inst) {
+            var nj = normInst(inst);
+            if (ni && nj && (ni.indexOf(nj) >= 0 || nj.indexOf(ni) >= 0)) cands = cands.concat(byInst[inst]);
+          });
+        }
+        var nt = normTitle(reportTitle);
+        if (!nt) return null;
+        for (var i = 0; i < cands.length; i++) {
+          var nr = normTitle(cands[i].report_title);
+          if (!nr) continue;
+          if (nt.indexOf(nr) >= 0 || nr.indexOf(nt) >= 0) return { entry: cands[i], method: 'title match' };
+        }
+        return null;
+      }
+    };
   }
   function summarizeState() {
     var recs = allRecords();
@@ -611,17 +969,27 @@
       var f = state.files[k];
       if (!f) return '<tr><td>' + FILE_DEFS[k].label + '</td><td>Not loaded</td><td>—</td></tr>';
       var r = f.report;
-      var count = r.fileKind === 'source_register' ? (r.entries ? r.entries.length : 0) + ' sources' : r.imported + ' records';
+      var count = r.fileKind === 'source_register' ? (r.entries ? r.entries.length : 0) + ' sources'
+        : r.fileKind === 'etf_mapping' ? (r.entries ? r.entries.length : 0) + ' ETF mappings'
+        : r.imported + ' records';
       var extra = r.error ? ' — error: ' + esc(r.error) : '';
       return '<tr><td>' + FILE_DEFS[k].label + '</td><td>' + count + '</td><td>' + esc(f.loadedAt || '') + extra + '</td></tr>';
     }).join('');
     setHTML('instStatusBody', lines);
     var s = summarizeState();
     var lookup = sourceLookup();
-    var unregistered = 0;
-    allRecords().forEach(function (r) { if (!lookup[r.institution + '|' + r.report_title]) unregistered++; });
+    var unregistered = 0, titleMatch = 0;
+    allRecords().forEach(function (r) {
+      var hit = lookup.find(r.institution, r.report_title);
+      if (!hit) unregistered++;
+      else if (hit.method === 'title match') titleMatch++;
+    });
+    var mapCount = (state.files.etf_mapping && state.files.etf_mapping.report && state.files.etf_mapping.report.entries)
+      ? state.files.etf_mapping.report.entries.length : 0;
     setText('instSummary', s.records + ' institutional records · ' + s.institutions + ' institutions · ' +
       s.assetClasses + ' asset classes · ' + s.horizons + ' horizons · ' + s.sources + ' sources in register' +
+      (mapCount ? ' · ' + mapCount + ' ETF mappings' : '') +
+      (titleMatch ? ' · ' + titleMatch + ' record(s) linked to the register by title match' : '') +
       (unregistered ? ' · ' + unregistered + ' record(s) cite a report not in the source register' : ''));
   }
 
@@ -652,11 +1020,17 @@
     if (!cohort) {
       setText('instOutlookNote', 'No institutional data loaded yet. The outlook appears once asset_forecasts.csv is imported.');
       setHTML('instReturnOnlyBody', ''); setHTML('instViewsBody', '');
+      setHTML('instUnverifiedBody', ''); setHTML('instPriceTargetBody', '');
       if (canvas) { var ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); }
       return;
     }
-    var plottable = [], returnOnly = [];
+    // Charts show VERIFIED_PRIMARY total-return forecasts only.
+    // NEEDS_VERIFICATION rows and index price targets (price return
+    // only, dividends excluded) are listed separately, never plotted.
+    var plottable = [], returnOnly = [], unverified = [], priceTargets = [];
     cohort.forecasts.forEach(function (r) {
+      if (isPriceTarget(r)) { priceTargets.push(r); return; }
+      if (!isVerified(r)) { unverified.push(r); return; }
       if (r.returnMid === null) return;
       if (r.volatility !== null) plottable.push(r);
       else returnOnly.push(r);
@@ -666,8 +1040,10 @@
         kind: 'etf', vol: r.volatility, ann: r.returnMid, rec: r };
     });
     if (typeof drawScatterChart === 'function' && canvas) drawScatterChart(canvas, outlookPoints);
-    setText('instOutlookNote', cohort.label + ' — ' + plottable.length + ' forecast(s) with both return and volatility plotted. ' +
-      returnOnly.length + ' forecast(s) have a return but no volatility and are listed below, not plotted. ' +
+    setText('instOutlookNote', cohort.label + ' — ' + plottable.length + ' verified forecast(s) with both return and volatility plotted. ' +
+      returnOnly.length + ' verified forecast(s) have a return but no volatility and are listed below, not plotted. ' +
+      (unverified.length ? unverified.length + ' forecast(s) are awaiting verification and are not plotted. ' : '') +
+      (priceTargets.length ? priceTargets.length + ' index price target(s) are not total returns and are not plotted. ' : '') +
       'Returns are ' + (cohort.records[0] && cohort.records[0].return_basis ? cohort.records[0].return_basis : 'as published') +
       ' over the stated horizon — a 10-year assumption is not a 12-month forecast.');
     setHTML('instReturnOnlyBody', returnOnly.map(function (r) {
@@ -676,12 +1052,22 @@
         : pctFmt(r.returnMid);
       return '<tr><td>' + esc(r.institution) + '</td><td>' + esc(shortAsset(r.asset_norm)) + '</td><td>' + ret +
         '</td><td>Volatility not supplied</td><td>' + esc(r.report_title) + ' · ' + esc(r.publication_date) + '</td></tr>';
-    }).join('') || '<tr><td colspan="5">None — every forecast in this cohort supplies volatility.</td></tr>');
+    }).join('') || '<tr><td colspan="5">None — every verified forecast in this cohort supplies volatility.</td></tr>');
     setHTML('instViewsBody', cohort.qualitative.map(function (r) {
       return '<tr><td>' + esc(r.institution) + '</td><td>' + esc(shortAsset(r.asset_norm)) + '</td><td>' +
         esc(r.view_rating || DIRECTION_LABEL[directionOf(r)]) + ' (' + DIRECTION_LABEL[directionOf(r)] + ')' +
         '</td><td>' + esc(r.report_title) + ' · ' + esc(r.publication_date) + '</td></tr>';
     }).join('') || '<tr><td colspan="4">No qualitative views in this cohort.</td></tr>');
+    setHTML('instUnverifiedBody', unverified.map(function (r) {
+      var ret = r.returnMid !== null ? pctFmt(r.returnMid) : '—';
+      return '<tr><td>' + esc(r.institution) + '</td><td>' + esc(shortAsset(r.asset_norm)) + '</td><td>' + ret +
+        '</td><td>' + esc(r.verification_status || 'unverified') + '</td><td>' + esc(r.report_title) + ' · ' + esc(r.publication_date) + '</td></tr>';
+    }).join('') || '<tr><td colspan="5">None in this cohort.</td></tr>');
+    setHTML('instPriceTargetBody', priceTargets.map(function (r) {
+      var lvl = r.target_level !== null ? r.target_level.toLocaleString() : '—';
+      return '<tr><td>' + esc(r.institution) + '</td><td>' + esc(shortAsset(r.asset_norm)) + '</td><td>' + lvl +
+        '</td><td>' + esc(r.target_date || '') + '</td><td>' + esc(r.report_title) + '</td></tr>';
+    }).join('') || '<tr><td colspan="5">None in this cohort.</td></tr>');
   }
 
   function outlookHoverText(rec) {
@@ -881,13 +1267,21 @@
     var keys = Object.keys(dirs);
     var dir = keys.length === 1 ? keys[0] : 'mixed';
     var insts = matches.map(function (r) { return shortInst(r.institution); }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ');
+    // Numeric impacts are shown only where the institution published
+    // one AND the row is VERIFIED_PRIMARY — otherwise direction only.
     var num = '';
     matches.forEach(function (r) {
+      if (!isVerified(r)) return;
       if (r.expected_low !== null && r.expected_high !== null) num = ' ' + pctPlain(r.expected_low) + ' to ' + pctPlain(r.expected_high);
       else if (r.returnMid !== null) num = ' ' + pctFmt(r.returnMid);
     });
     var title = matches.map(function (r) { return r.institution + ' — ' + r.report_title + ' (' + r.publication_date + ')'; }).join('; ');
-    return '<td title="' + esc(title) + '">' + DIRECTION_MARK[dir] + ' ' + DIRECTION_LABEL[dir] + ' · ' + esc(insts) + esc(num) + '</td>';
+    // Free-text directions ('Higher yields', 'Negative for duration
+    // ...') are shown as published, not forced into ▲/▼.
+    var dirText = dir === 'unknown'
+      ? matches.map(function (r) { return r.view_direction || r.view_rating || ''; }).filter(function (v) { return v; })[0] || 'Direction not stated'
+      : DIRECTION_MARK[dir] + ' ' + DIRECTION_LABEL[dir];
+    return '<td title="' + esc(title) + '">' + esc(dirText) + ' · ' + esc(insts) + esc(num) + '</td>';
   }
 
   // --- Ingestion report ----------------------------------------------
@@ -898,7 +1292,9 @@
       if (!f) { parts.push('<p><strong>' + FILE_DEFS[k].label + ':</strong> not loaded.</p>'); return; }
       var r = f.report;
       if (r.error) { parts.push('<p><strong>' + FILE_DEFS[k].label + ':</strong> error — ' + esc(r.error) + '</p>'); return; }
-      var n = r.fileKind === 'source_register' ? (r.entries || []).length + ' sources' : r.imported + ' imported';
+      var n = r.fileKind === 'source_register' ? (r.entries || []).length + ' sources'
+        : r.fileKind === 'etf_mapping' ? (r.entries || []).length + ' ETF mappings'
+        : r.imported + ' imported';
       parts.push('<p><strong>' + FILE_DEFS[k].label + ':</strong> ' + n +
         ' · ' + r.rejected + ' rejected · ' + r.skipped + ' skipped (duplicates) · ' + r.conflicts.length + ' conflict(s)' +
         (r.unrecognizedColumns && r.unrecognizedColumns.length ? ' · unrecognized columns: ' + esc(r.unrecognizedColumns.join(', ')) : '') + '</p>');
@@ -911,13 +1307,26 @@
     if (recs.length) {
       var cov = {};
       recs.forEach(function (r) {
-        var k = r.institution + ' · ' + (r.horizon_label || 'unspecified horizon');
+        var k = r.institution + ' · ' + horizonLabel(r);
         cov[k] = (cov[k] || 0) + 1;
       });
       parts.push('<p>Coverage: ' + Object.keys(cov).map(function (k) { return esc(k) + ' (' + cov[k] + ')'; }).join('; ') + '</p>');
+      var fc = recs.filter(function (r) { return r.record_type === 'return_forecast'; });
+      if (fc.length) {
+        var verified = fc.filter(isVerified).length;
+        var priceTargets = fc.filter(isPriceTarget).length;
+        parts.push('<p>Verification: ' + verified + ' of ' + fc.length + ' forecast rows are VERIFIED_PRIMARY; ' +
+          (fc.length - verified) + ' are awaiting verification; ' + priceTargets + ' index price target(s) (not total returns).</p>');
+      }
+      var lookup = sourceLookup();
+      var unlinked = {};
+      recs.forEach(function (r) { if (!lookup.find(r.institution, r.report_title)) unlinked[r.institution + ' — ' + r.report_title] = true; });
+      var unlinkedKeys = Object.keys(unlinked);
+      if (unlinkedKeys.length) parts.push('<p>Reports cited by records but not in the source register (' + unlinkedKeys.length + '): ' +
+        esc(unlinkedKeys.slice(0, 5).join('; ')) + (unlinkedKeys.length > 5 ? '; …' : '') + '</p>');
       var cohort = currentCohort();
       if (cohort) {
-        var gaps = Object.keys(ETF_MAP).filter(function (s) { return !forecastForETF(cohort, s); });
+        var gaps = Object.keys(liveETFMap()).filter(function (s) { return !forecastForETF(cohort, s); });
         var noVol = cohort.forecasts.filter(function (r) { return r.returnMid !== null && r.volatility === null; }).length;
         parts.push('<p>Mapping gaps in the selected cohort (' + esc(cohort.label) + '): ' +
           (gaps.length ? 'no forecast for ' + gaps.join(', ') : 'every ETF has a forecast or a labelled proxy') +
@@ -927,14 +1336,52 @@
       parts.push('<p>No institutional records yet. Next documents needed (from the agent instructions): the seed CSVs — ' +
         '10-year / 10–15-year numeric assumptions from PGIM, Vanguard and J.P. Morgan (asset_forecasts.csv), ' +
         'November 2026 BlackRock qualitative tactical views (tactical_views.csv), scenario rows (scenario_assumptions.csv), ' +
-        'and the source register (source_register.csv). Nothing is shown until those files arrive.</p>');
+        'the source register (source_register.csv), and the ETF mapping (etf_mapping.csv). Nothing is shown until those files arrive.</p>');
     }
     if (whatChanged) parts.push('<p><strong>What changed:</strong> ' + esc(whatChanged) + '</p>');
     setHTML('instReport', parts.join(''));
   }
 
+  function renderMapping() {
+    var map = liveETFMap();
+    var fromFile = state.files.etf_mapping && state.files.etf_mapping.report && state.files.etf_mapping.report.entries;
+    var rows;
+    if (fromFile && fromFile.length) {
+      // Show exactly what etf_mapping.csv says — no hardcoded rows.
+      rows = fromFile.map(function (e) {
+        var m = map[e.etf] || {};
+        var fc = e.forecast_class_norm ? shortAsset(e.forecast_class_norm) : 'No sector forecast';
+        var note = e.notes ? ' title="' + esc(e.notes) + '"' : '';
+        return '<tr' + note + '><td>' + esc(e.etf) + '</td><td>' + esc(e.benchmark || '—') + '</td><td>' + esc(fc) +
+          '</td><td>' + esc(e.mapping_type) + '</td><td>' + esc(e.confidence || '—') + '</td></tr>';
+      }).join('');
+    } else {
+      rows = Object.keys(map).filter(function (s) { return ETFS[s]; }).map(function (sym) {
+        var m = map[sym];
+        var fc = m.asset ? shortAsset(m.asset) : 'No sector forecast';
+        var type = m.mappingType || (m.asset ? 'direct' : 'proxy');
+        var conf = m.confidence || '—';
+        var note = m.mappingNote ? ' title="' + esc(m.mappingNote) + '"' : '';
+        return '<tr' + note + '><td>' + esc(sym) + '</td><td>' + esc(m.benchmark || '—') + '</td><td>' + esc(fc) +
+          '</td><td>' + esc(type) + '</td><td>' + esc(conf) + '</td></tr>';
+      }).join('');
+    }
+    setHTML('instMappingBody', rows || '<tr><td colspan="5">No ETF mapping loaded.</td></tr>');
+  }
+
+  function renderSources() {
+    var rows = state.sources.map(function (e) {
+      var link = e.source_url ? '<a href="' + esc(e.source_url) + '" target="_blank" rel="noopener">source</a>' : '—';
+      return '<tr><td>' + esc(e.institution) + '</td><td>' + esc(e.report_title) + '</td><td>' +
+        esc(e.publication_date || '—') + '</td><td>' + esc(e.verification_status || '—') + '</td><td>' + link + '</td></tr>';
+    }).join('');
+    setHTML('instSourcesBody', rows || '<tr><td colspan="5">No sources in the register yet.</td></tr>');
+  }
+
   function renderAll(whatChanged) {
     renderStatus();
+    renderMapping();
+    renderSources();
     renderCohortButtons();
     renderOutlook();
     renderPortfolio();
@@ -954,7 +1401,9 @@
     if (report.error) return '<p class="error">Cannot import: ' + esc(report.error) + '</p>';
     var n = report.fileKind === 'source_register'
       ? (report.entries || []).length + ' source(s)'
-      : report.imported + ' record(s)';
+      : report.fileKind === 'etf_mapping'
+        ? (report.entries || []).length + ' ETF mapping(s)'
+        : report.imported + ' record(s)';
     var html = '<p>Preview: ' + n + ' · ' + report.rejected + ' rejected · ' + report.skipped + ' skipped · ' +
       report.conflicts.length + ' conflict(s).</p>';
     if (report.rejectedRows.length) {
@@ -969,15 +1418,31 @@
     if (existing && existing.report && !existing.report.error) {
       var d = report.fileKind === 'source_register'
         ? diffRegister(existing.report.entries || [], report.entries || [])
-        : diffRecords(existing.report.records || [], report.records || []);
+        : report.fileKind === 'etf_mapping'
+          ? diffMapping(existing.report.entries || [], report.entries || [])
+          : diffRecords(existing.report.records || [], report.records || []);
       html += '<p>Replacing ' + esc(existing.label || FILE_DEFS[kind].label) + ' would: add ' + d.added.length +
         ', remove ' + d.removed.length + ', change ' + d.changed.length + ', keep ' + d.unchanged + '.</p>';
     } else {
       html += '<p>No existing ' + FILE_DEFS[kind].label + ' on the site — this will be the first import.</p>';
     }
-    html += '<p class="note">Preview only — nothing has changed yet. Import applies this file alone; the other three files are untouched. ' +
+    html += '<p class="note">Preview only — nothing has changed yet. Import applies this file alone; the other files are untouched. ' +
       'To make it the site’s saved data, send the CSV to Cléo for the repo.</p>';
     return html;
+  }
+
+  function diffMapping(oldEntries, newEntries) {
+    var oldMap = {}, newMap = {};
+    oldEntries.forEach(function (e) { oldMap[e.etf] = e; });
+    newEntries.forEach(function (e) { newMap[e.etf] = e; });
+    var added = [], removed = [], changed = [], unchanged = 0;
+    Object.keys(newMap).forEach(function (k) {
+      if (!oldMap[k]) added.push(newMap[k]);
+      else if (oldMap[k].forecast_class === newMap[k].forecast_class && oldMap[k].mapping_type === newMap[k].mapping_type) unchanged++;
+      else changed.push({ from: oldMap[k], to: newMap[k] });
+    });
+    Object.keys(oldMap).forEach(function (k) { if (!newMap[k]) removed.push(oldMap[k]); });
+    return { added: added, removed: removed, changed: changed, unchanged: unchanged };
   }
   function diffRegister(oldEntries, newEntries) {
     var key = function (e) { return e.institution + '|' + e.report_title; };
@@ -1032,7 +1497,9 @@
       if (state.files[kind] && state.files[kind].report && !state.files[kind].report.error) {
         d = p.report.fileKind === 'source_register'
           ? diffRegister(state.files[kind].report.entries || [], p.report.entries || [])
-          : diffRecords(state.files[kind].report.records || [], p.report.records || []);
+          : p.report.fileKind === 'etf_mapping'
+            ? diffMapping(state.files[kind].report.entries || [], p.report.entries || [])
+            : diffRecords(state.files[kind].report.records || [], p.report.records || []);
       }
       state.files[kind] = { report: p.report, label: p.filename, loadedAt: new Date().toISOString().slice(0, 10) + ' (uploaded preview)' };
       if (kind === 'source_register') state.sources = p.report.entries || [];
@@ -1077,7 +1544,7 @@
         if (r.kind === 'source_register') state.sources = report.entries || [];
         loaded.push(FILE_DEFS[r.kind].label);
       });
-      renderAll(loaded.length ? 'Loaded from repo: ' + loaded.join(', ') + '.' : 'No repo data files found yet — upload the four CSVs below, or send them to Cléo for the repo.');
+      renderAll(loaded.length ? 'Loaded from repo: ' + loaded.join(', ') + '.' : 'No repo data files found yet — upload the five CSVs below, or send them to Cléo for the repo.');
     });
   }
 
@@ -1127,10 +1594,15 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       parseCSV: parseCSV, ingestCSV: ingestCSV, ingestSourceRegister: ingestSourceRegister,
-      ingestFile: ingestFile, detectFileKind: detectFileKind, buildCohorts: buildCohorts,
+      ingestETFMapping: ingestETFMapping, ingestFile: ingestFile, detectFileKind: detectFileKind,
+      buildCohorts: buildCohorts, buildETFMap: buildETFMap, liveETFMap: liveETFMap,
       forecastForETF: forecastForETF, portfolioExpectedReturn: portfolioExpectedReturn,
       normalizeAssetClass: normalizeAssetClass, matchScenario: matchScenario,
       directionOf: directionOf, diffRecords: diffRecords, diffRegister: diffRegister,
+      diffMapping: diffMapping, isVerified: isVerified, isPriceTarget: isPriceTarget,
+      horizonKey: horizonKey, horizonLabel: horizonLabel, normReturnBasis: normReturnBasis,
+      normCurrency: normCurrency, normGrossNet: normGrossNet, parseHorizonYears: parseHorizonYears,
+      sourceLookup: sourceLookup, state: state,
       FILE_DEFS: FILE_DEFS, ETF_MAP: ETF_MAP, SCENARIOS: SCENARIOS
     };
   }
