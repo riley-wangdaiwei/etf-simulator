@@ -680,7 +680,7 @@
     if (parsed.error) return { error: parsed.error, fileKind: null, filename: filename };
     var det = detectFileKind(filename, parsed.headers);
     if (!det.kind) {
-      return { error: 'Cannot recognize this file: its name and columns match none of the four files (asset_forecasts, tactical_views, scenario_assumptions, source_register).', fileKind: null, filename: filename };
+      return { error: 'Cannot recognize this file: its name and columns match none of the five files (asset_forecasts, tactical_views, scenario_assumptions, source_register, etf_mapping).', fileKind: null, filename: filename };
     }
     var def = FILE_DEFS[det.kind];
     var rep;
@@ -691,7 +691,14 @@
     if (det.byName && det.byHeaders && det.byName !== det.byHeaders) {
       rep.warnings.unshift('Filename says ' + det.byName + ' but the columns look like ' + det.byHeaders + '. Filed under the filename — check the file if that is wrong.');
     }
-    var missingNeeds = def.needs.filter(function (c) { return parsed.headers.indexOf(c) < 0; });
+    // A need is satisfied by the canonical name or by any header
+    // that aliases to it (e.g. expected_volatility_pct satisfies
+    // volatility_pct) — otherwise the real files would warn about
+    // columns they actually carry under their own names.
+    var missingNeeds = def.needs.filter(function (c) {
+      return parsed.headers.indexOf(c) < 0 &&
+        !parsed.headers.some(function (h) { return HEADER_ALIASES[h] === c; });
+    });
     if (missingNeeds.length) {
       rep.warnings.unshift('Expected column(s) missing for ' + det.kind + ': ' + missingNeeds.join(', ') + '. Rows that need them were rejected or flagged.');
     }
