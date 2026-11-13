@@ -34,9 +34,14 @@ input[type="number"]:focus { outline: none; border-bottom-color: #fff; }
 .error { color: #fff; border: 1px solid #888; padding: 8px 10px; margin: 10px 0; }
 .big { font-size: 30px; font-weight: 800; margin: 6px 0 2px; }
 .note { color: #888; font-size: 13px; }
-#chart { width: 100%; height: 300px; background: #000; border: 1px solid #222; margin: 12px 0 4px; display: block; }
-#drawdownChart { width: 100%; height: 260px; background: #000; border: 1px solid #222; margin: 12px 0 4px; display: block; }
-#scatterChart { width: 100%; height: 340px; background: #000; border: 1px solid #222; margin: 12px 0 4px; display: block; }
+/* One rule for all six charts: historical and forecast share the same
+   size, frame, and margins, so they render identically at any width. */
+#chart, #drawdownChart, #scatterChart, #polyProjGrowth, #polyProjDrawdown, #polyProjScatter {
+  width: 100%; background: #000; border: 1px solid #222; margin: 12px 0 4px; display: block;
+}
+#chart, #polyProjGrowth { height: 300px; }
+#drawdownChart, #polyProjDrawdown { height: 260px; }
+#scatterChart, #polyProjScatter { height: 340px; }
 table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; }
 th, td { text-align: left; padding: 6px 6px 6px 0; border-bottom: 1px solid #222; }
 th { color: #888; font-weight: 400; font-size: 12px; letter-spacing: 1px; }
