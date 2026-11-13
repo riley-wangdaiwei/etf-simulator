@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ETF Portfolio Simulator</title>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <header>
@@ -73,39 +73,86 @@
     </div>
   </section>
 
-  <section id="polymarketOutlook">
-    <h2>Polymarket Outlook</h2>
-    <p class="stress-label">Live market data from Polymarket — market-implied probabilities, not forecasts</p>
-    <p class="note">Each row shows the live Polymarket contract that best matches the ETF, or states plainly that none was found. Prices are what traders will pay for a YES outcome — a market-implied probability, not an objective probability and not a prediction of what the ETF will return. Low-liquidity or stale prices are flagged, not hidden. The historical backtest above is untouched and still uses only real market data.</p>
-    <p><span id="polyUpdated">Last updated: —</span><span class="note" id="polyStatus"></span></p>
-    <div class="btn-row"><button id="polyRefreshBtn" type="button">Refresh prices</button></div>
-    <table id="polyTable">
-      <thead><tr><th>ETF</th><th>Polymarket market</th><th>Probability</th><th>Expiry</th><th>Mapping</th><th>Link</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="note">Method: Gamma API (<span>/public-search</span> for discovery, <span>/events?slug=</span> for detail). Index markets are price bands, shown as a distribution with the most likely band first. Correlation proxies are not claimed: the relevant contracts are weeks old, below the 60-observation threshold, so every proxy here is Provisional at most. Bid/ask is not shown — CLOB /book and /midpoint returned errors for valid tokens in testing, so prices are Gamma outcomePrices with volume and liquidity shown instead.</p>
+  <section id="institutionalForecast">
+    <h2>Institutional Forecast Analyzer</h2>
+    <p class="stress-label">Forward-looking views from published institutional research — not market prices, not backtested returns</p>
+    <p class="note">Three views built only from institutional research supplied as CSV files: what institutions expect from asset classes, how your saved portfolios compare under those assumptions, and how portfolios may respond to macro scenarios. Horizons are kept separate — a 10-year assumption is never presented as a 12-month forecast. Nothing here is a guarantee or a personalized investment recommendation.</p>
 
-    <h3>Forward-looking portfolio — projected 12 months</h3>
-    <p class="note">Same three views as the backtest, but forward: what the market implies for <strong>your portfolio</strong> over the next 12 months, from the S&amp;P 500 Dec-2026 close bands. The S&amp;P distribution is direct market-implied data; each ETF is a proxy mapped to it through its beta to VOO (no historical alpha assumed), and the portfolio paths come from 4,000 simulations that keep the correlations between ETFs. Everything here recalculates when you change weights. The market prices only Dec 31, 2026 — the monthly shape and the months past Dec 31 are model assumptions, stated in the method note below, not market data.</p>
-    <h3>Projected Portfolio Growth</h3>
-    <p class="note">Median projected portfolio value over the next 12 months, starting at the actual current value (the backtest's final value). The band is the 10th–90th percentile across 4,000 paths — it shows uncertainty, not a guaranteed outcome.</p>
-    <p id="polyProjLine">—</p>
-    <canvas id="polyProjGrowth" width="720" height="300"></canvas>
-    <p class="note" id="polyProjGrowthHover">Hover over the line to see a month's median, 10th, and 90th percentile values.</p>
-    <h3>Projected Portfolio Drawdown</h3>
-    <p class="note">Median projected drawdown, using the same formula as the historical chart: portfolio value / running peak − 1, computed separately for each simulated path, then the median across paths. Drawdown comes from projected portfolio values, never from changes in Polymarket probabilities.</p>
-    <canvas id="polyProjDrawdown" width="720" height="260"></canvas>
-    <p class="note" id="polyProjDrawdownHover">Hover over the line to see a month's median drawdown.</p>
-    <p id="polyProjDrawdownLine">—</p>
-    <h3>Projected Risk–Return</h3>
-    <p class="note">Projected annualized volatility (horizontal) vs projected annualized return (vertical). Each ETF is one point; the large filled dot is your whole portfolio. Same design, point styles, and tooltips as the historical scatter — only the metrics are projected, not historical.</p>
-    <canvas id="polyProjScatter" width="720" height="340"></canvas>
-    <p class="note" id="polyProjScatterHover">Hover near a point to see its projected volatility and annualized return.</p>
-    <table id="polyProjTable">
-      <thead><tr><th>ETF</th><th>Weight</th><th>Projected return</th><th>Projected volatility</th><th>Mapping</th></tr></thead>
-      <tbody></tbody>
+    <h3>Data status</h3>
+    <table>
+      <thead><tr><th>File</th><th>Loaded</th><th>Details</th></tr></thead>
+      <tbody id="instStatusBody"></tbody>
     </table>
-    <p class="note" id="polyProjNote"></p>
+    <p class="note" id="instSummary">Loading…</p>
+
+    <h3>Import data</h3>
+    <p class="note">Upload the four CSV files one at a time. Each file is validated and previewed before anything is imported, and importing one file never touches the other three. An upload is a preview on this device only — to make a file the site's saved data, send it to Cléo for the repo.</p>
+    <div class="inst-upload">
+      <p><strong>asset_forecasts.csv</strong> — expected returns, volatility, asset classes, forecast horizons.</p>
+      <input type="file" id="instFile-asset_forecasts" accept=".csv,text/csv">
+      <div id="instPreview-asset_forecasts"></div>
+      <div class="btn-row"><button id="instImport-asset_forecasts" type="button" disabled>Import asset_forecasts.csv</button></div>
+    </div>
+    <div class="inst-upload">
+      <p><strong>tactical_views.csv</strong> — short-term institutional views: Overweight / Neutral / Underweight.</p>
+      <input type="file" id="instFile-tactical_views" accept=".csv,text/csv">
+      <div id="instPreview-tactical_views"></div>
+      <div class="btn-row"><button id="instImport-tactical_views" type="button" disabled>Import tactical_views.csv</button></div>
+    </div>
+    <div class="inst-upload">
+      <p><strong>scenario_assumptions.csv</strong> — institutional macroeconomic scenarios and expected market impacts.</p>
+      <input type="file" id="instFile-scenario_assumptions" accept=".csv,text/csv">
+      <div id="instPreview-scenario_assumptions"></div>
+      <div class="btn-row"><button id="instImport-scenario_assumptions" type="button" disabled>Import scenario_assumptions.csv</button></div>
+    </div>
+    <div class="inst-upload">
+      <p><strong>source_register.csv</strong> — report sources: publication dates, URLs, page references, verification status.</p>
+      <input type="file" id="instFile-source_register" accept=".csv,text/csv">
+      <div id="instPreview-source_register"></div>
+      <div class="btn-row"><button id="instImport-source_register" type="button" disabled>Import source_register.csv</button></div>
+    </div>
+
+    <h3>Forecast horizon</h3>
+    <div class="btn-row" id="instCohortRow"></div>
+
+    <h3>1. Institutional Asset Outlook</h3>
+    <p class="note">Each point is one institution × asset class × horizon. Only forecasts that supply both a return and a volatility are plotted; the rest are listed below, not plotted. Hover over a point for the institution, report, dates, horizon, currency, basis, and source link.</p>
+    <canvas id="instOutlook" width="720" height="340"></canvas>
+    <p class="note" id="instOutlookHover">Hover near a point to see its expected return and volatility.</p>
+    <p class="note" id="instOutlookDetail"></p>
+    <p class="note" id="instOutlookNote"></p>
+    <h3>Forecasts with a return but no volatility</h3>
+    <table>
+      <thead><tr><th>Institution</th><th>Asset class</th><th>Expected return</th><th>Volatility</th><th>Report</th></tr></thead>
+      <tbody id="instReturnOnlyBody"></tbody>
+    </table>
+    <h3>Qualitative views in this cohort</h3>
+    <p class="note">Overweight / Neutral / Underweight and directional views. Qualitative language is never converted into a number.</p>
+    <table>
+      <thead><tr><th>Institution</th><th>Asset class</th><th>View</th><th>Report</th></tr></thead>
+      <tbody id="instViewsBody"></tbody>
+    </table>
+
+    <h3>2. Portfolio Risk–Return Comparison</h3>
+    <p class="note">Expected return for your current weights and each preset, under each institution's assumptions in this cohort. Institutions are shown separately; the range across them is a range, not a confidence interval. Portfolio volatility is “not available” unless a compatible covariance matrix is supplied.</p>
+    <canvas id="instPortBars" width="720" height="300"></canvas>
+    <p><label><input type="checkbox" id="instProxy"> Show historical covariance proxy</label> <span class="note">Realized volatility from 72 months of history (2020-10–2026-10), shown separately and labelled as a proxy — not a forecast.</span></p>
+    <table>
+      <thead><tr><th>Portfolio</th><th>Institution</th><th>Expected return</th><th>Coverage</th><th>Portfolio volatility</th><th>Usable inputs</th></tr></thead>
+      <tbody id="instPortBody"></tbody>
+    </table>
+    <p class="note" id="instPortNote"></p>
+
+    <h3>3. Scenario Stress Test</h3>
+    <p class="note">Qualitative exposure matrix from published institutional scenario commentary.</p>
+    <table>
+      <thead><tr id="instScenarioHead"></tr></thead>
+      <tbody id="instScenarioBody"></tbody>
+    </table>
+    <p class="note" id="instScenarioNote"></p>
+
+    <h3>Ingestion report</h3>
+    <div id="instReport"><p class="note">Loading…</p></div>
   </section>
 
   <section>
@@ -115,6 +162,7 @@
     <p>Drawdown recovery: for the worst drawdown, the peak is the highest portfolio value before the trough, the recovery date is the first month after the trough when the value reaches that peak again, and “not yet recovered” means it had not reached it by the end of the period.</p>
     <p id="dataNote">Data: month-end adjusted closes (including reinvested dividends), see data.js. Past performance does not predict future results; taxes, trading costs, and inflation are not included.</p>
     <p>Why QQQM and SGOV have shorter histories: QQQM launched in October 2020 and SGOV in May 2020, so the common starting point for all thirteen ETFs is October 2020. “All” therefore covers about 6 years, not decades. A longer history, using proxy indices or older ETFs, is a possible next step.</p>
+    <p>Institutional forecasts: the analyzer reads only the four CSV files described in the Data status section (asset_forecasts, tactical_views, scenario_assumptions, source_register). Blank values mean “not supplied”, never zero. Forecasts are grouped by horizon, currency, return definition, and gross/net before anything is compared; incompatible forecasts are never averaged. Sector ETFs use a broad-equity proxy only when no sector forecast exists, and the proxy is labelled wherever it appears. Historical prices are used only for the clearly labelled historical covariance proxy in chart 2 — never as a forecast.</p>
   </section>
 </main>
 
@@ -124,6 +172,6 @@
 
 <script src="data.js"></script>
 <script src="app.js?v=2"></script>
-<script src="polymarket.js?v=2"></script>
+<script src="institutional.js?v=1"></script>
 </body>
 </html>
