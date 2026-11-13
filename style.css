@@ -41,3 +41,9 @@ table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; 
 th, td { text-align: left; padding: 6px 6px 6px 0; border-bottom: 1px solid #222; }
 th { color: #888; font-weight: 400; font-size: 12px; letter-spacing: 1px; }
 footer { margin-top: 50px; color: #666; font-size: 13px; }
+
+/* Polymarket Outlook (reuses the site's table/button styles) */
+.stress-label { color: #fff; border: 1px solid #888; padding: 8px 10px; margin: 10px 0; font-size: 14px; }
+.poly-flag { color: #fff; font-weight: 700; }
+.poly-none { color: #fff; font-weight: 700; }
+#polyTable td { vertical-align: top; }

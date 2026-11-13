@@ -73,6 +73,19 @@
     </div>
   </section>
 
+  <section id="polymarketOutlook">
+    <h2>Polymarket Outlook</h2>
+    <p class="stress-label">Live market data from Polymarket — market-implied probabilities, not forecasts</p>
+    <p class="note">Each row shows the live Polymarket contract that best matches the ETF, or states plainly that none was found. Prices are what traders will pay for a YES outcome — a market-implied probability, not an objective probability and not a prediction of what the ETF will return. Low-liquidity or stale prices are flagged, not hidden. The historical backtest above is untouched and still uses only real market data.</p>
+    <p><span id="polyUpdated">Last updated: —</span><span class="note" id="polyStatus"></span></p>
+    <div class="btn-row"><button id="polyRefreshBtn" type="button">Refresh prices</button></div>
+    <table id="polyTable">
+      <thead><tr><th>ETF</th><th>Polymarket market</th><th>Probability</th><th>Expiry</th><th>Mapping</th><th>Link</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="note">Method: Gamma API (<span>/public-search</span> for discovery, <span>/events?slug=</span> for detail). Index markets are price bands, shown as a distribution with the most likely band first. Correlation proxies are not claimed: the relevant contracts are weeks old, below the 60-observation threshold, so every proxy here is Provisional at most. Bid/ask is not shown — CLOB /book and /midpoint returned errors for valid tokens in testing, so prices are Gamma outcomePrices with volume and liquidity shown instead.</p>
+  </section>
+
   <section>
     <h2>Method and notes</h2>
     <p>Rebalanced monthly to your target weights: each month's portfolio return is the weighted average of the ETFs' monthly returns. The starting point is the first month's adjusted close in the selected range, compounded monthly from there.</p>
@@ -89,5 +102,6 @@
 
 <script src="data.js"></script>
 <script src="app.js"></script>
+<script src="polymarket.js"></script>
 </body>
 </html>

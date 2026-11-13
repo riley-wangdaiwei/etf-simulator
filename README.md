@@ -15,6 +15,10 @@ A simple interactive ETF portfolio simulator for learning long-term investing an
 
 Black background, white text, left-aligned, following the habit of past pages (Vibe & Verify): simple and light, no colorful decoration.
 
+## Polymarket Outlook
+
+A small panel below the backtest that reads live Polymarket data (public Gamma API, no key, no trading). Each of the 13 ETFs shows its best-matching contract — S&P 500 year-end close bands for VOO/VTI, Nasdaq-100 bands for QQQM, WTI touch thresholds for XLE, and the Fed rate-cut market for BND/SGOV/BIL — or states `No reliable Polymarket proxy found`. Mapping code and notes live in `polymarket.js`; prices are fetched live in the browser and cached for 15 minutes. Index markets are shown as a band distribution, not a single YES number. Known limits (verified 2026-11-12): Gamma search endpoints ignore the query, so discovery uses `/public-search`; Nasdaq-100 bands are effectively untraded and their prices sum to ~317%, so no live price is shown for QQQM; CLOB /book and /midpoint returned errors for valid tokens, so bid/ask is not shown and prices are Gamma outcomePrices. No correlation is claimed — the contracts are too new for the 60-observation threshold, so proxies are Provisional at most.
+
 ## Data note
 
 The common starting point for all ETFs is October 2020 (QQQM launched in October 2020, SGOV in May 2020), so “All” covers about 6 years.
