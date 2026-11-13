@@ -280,7 +280,7 @@ function drawDrawdown() {
 function drawScatterChart(c, points) {
   const { ctx, W, H } = setupCanvas(c);
   if (!points.length) return;
-  const padL = 56, padR = 14, padT = 14, padB = 30;
+  const padL = 56, padR = 14, padT = 30, padB = 30;
   const vols = points.map(p => p.vol), anns = points.map(p => p.ann);
   const xMax = Math.max(...vols) * 1.08;
   let yMin = Math.min(...anns), yMax = Math.max(...anns);
@@ -302,8 +302,14 @@ function drawScatterChart(c, points) {
   if (yMin < 0 && yMax > 0) {
     ctx.strokeStyle = '#555'; ctx.beginPath(); ctx.moveTo(padL, y(0)); ctx.lineTo(W - padR, y(0)); ctx.stroke();
   }
+  // Axis title at the top right, in the margin above the plot — it used
+  // to sit on the bottom row, where it painted over the tick labels.
   ctx.fillStyle = '#888';
-  ctx.fillText('Annualized volatility →', W - 170, H - 10);
+  ctx.textAlign = 'right';
+  ctx.fillText('Annualized volatility →', W - padR, 13);
+  ctx.textAlign = 'left';
+  const titleW = ctx.measureText('Annualized volatility →').width;
+  const occupied = [{ x0: W - padR - titleW, y0: 2, x1: W - padR, y1: 15 }];
   points.forEach(p => {
     p.px = x(p.vol); p.py = y(p.ann);
   });
@@ -316,11 +322,27 @@ function drawScatterChart(c, points) {
       ctx.fillStyle = '#fff'; ctx.fillRect(p.px - 3, p.py - 3, 6, 6);
     }
   });
+  // Point labels: shift a label up or down when it would cover another
+  // label or the axis title (the projected points cluster in a narrow
+  // band, so the default position overlaps). Same 11px labels, just
+  // placed so nothing is hidden.
   ctx.fillStyle = '#eee'; ctx.font = '11px sans-serif';
   points.forEach(p => {
     const label = p.name;
     const tx = Math.min(p.px + 9, W - 110);
-    ctx.fillText(label, tx, p.py - 8);
+    const w = ctx.measureText(label).width;
+    let ty = p.py - 8;
+    const overlaps = (y) => occupied.some(b =>
+      tx < b.x1 + 2 && tx + w > b.x0 - 2 && y - 11 < b.y1 + 2 && y + 2 > b.y0 - 2);
+    let placed = false;
+    for (const dy of [0, 13, -13, 26, -26, 39, -39]) {
+      const y = ty + dy;
+      if (y - 11 < 0 || y > H - 2) continue;
+      if (!overlaps(y)) { ty = y; placed = true; break; }
+    }
+    if (!placed) ty = Math.max(12, Math.min(H - 2, ty));
+    occupied.push({ x0: tx, y0: ty - 11, x1: tx + w, y1: ty + 2 });
+    ctx.fillText(label, tx, ty);
   });
   c._scatterPoints = points;
 }
