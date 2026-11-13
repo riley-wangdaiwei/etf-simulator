@@ -85,22 +85,25 @@
     </table>
     <p class="note">Method: Gamma API (<span>/public-search</span> for discovery, <span>/events?slug=</span> for detail). Index markets are price bands, shown as a distribution with the most likely band first. Correlation proxies are not claimed: the relevant contracts are weeks old, below the 60-observation threshold, so every proxy here is Provisional at most. Bid/ask is not shown — CLOB /book and /midpoint returned errors for valid tokens in testing, so prices are Gamma outcomePrices with volume and liquidity shown instead.</p>
 
-    <h3>Prediction charts</h3>
-    <p class="note">Same three views as the backtest, but for what the market thinks, not what happened. Growth is the market-implied probability over time; drawdown is how far that probability has fallen from its peak, in percentage points; the scatter puts each live prediction market on one point — horizontal axis: how much its probability moves day to day (volatility, pp), vertical axis: its current probability. Pick a market:</p>
-    <div class="btn-row" id="polySeriesRow"></div>
-    <p id="polyGrowthLine">—</p>
-    <canvas id="polyGrowthChart" width="720" height="300"></canvas>
-    <p class="note" id="polyGrowthHover">Hover over the line to see a day's probability.</p>
-    <h3>Probability drawdown</h3>
-    <p class="note">Drawdown is how far the implied probability is below its previous peak: current probability − peak probability, in percentage points.</p>
-    <canvas id="polyDrawdownChart" width="720" height="260"></canvas>
-    <p class="note" id="polyDrawdownHover">Hover over the line to see a day's drawdown.</p>
-    <p id="polyDrawdownLine">—</p>
-    <h3>Prediction scatter</h3>
-    <p class="note">Horizontal axis: probability volatility — the standard deviation of daily changes in the implied probability, in percentage points. Vertical axis: current implied probability. A market high and to the right is both likely and jumpy; high and to the left is likely and steady.</p>
-    <canvas id="polyScatterChart" width="720" height="340"></canvas>
-    <p class="note" id="polyScatterHover">Hover near a point to see its probability and volatility.</p>
-    <p class="note" id="polyHistoryNote"></p>
+    <h3>Forward-looking portfolio — market-implied to Dec 31, 2026</h3>
+    <p class="note">Same three views as the backtest, but forward: what the market implies for <strong>your portfolio</strong> at Dec 31, 2026, from the S&amp;P 500 close bands. The S&amp;P distribution is direct market-implied data; each ETF is a proxy mapped to it through its beta to VOO (no historical alpha assumed), and the portfolio distribution comes from 4,000 simulated paths that keep the correlations between ETFs. Everything here recalculates when you change weights. Nothing is projected past Dec 31 — no market prices a longer horizon.</p>
+    <p id="polyProjLine">—</p>
+    <canvas id="polyProjGrowth" width="720" height="300"></canvas>
+    <p class="note" id="polyProjGrowthHover">Hover over a bar to see how many of the 4,000 paths land there.</p>
+    <h3>Projected downside</h3>
+    <p class="note">Distribution of the portfolio's Dec-31 return. The shaded region is losing outcomes. This is the market-implied downside, not a drawdown path over time — there is no market data for the path in between.</p>
+    <canvas id="polyProjDrawdown" width="720" height="260"></canvas>
+    <p class="note" id="polyProjDrawdownHover">Hover over a bar to see how many of the 4,000 paths land there.</p>
+    <p id="polyProjDrawdownLine">—</p>
+    <h3>Projected risk–return</h3>
+    <p class="note">Each ETF is one point: horizontal axis is projected volatility to Dec 31, vertical axis is projected return. Point size is portfolio weight; the large filled dot is your whole portfolio. All points are proxies (beta-mapped to the S&amp;P 500 Dec-2026 distribution), not direct market forecasts for that ETF.</p>
+    <canvas id="polyProjScatter" width="720" height="340"></canvas>
+    <p class="note" id="polyProjScatterHover">Hover near a point to see its projected return, volatility, and weight.</p>
+    <table id="polyProjTable">
+      <thead><tr><th>ETF</th><th>Weight</th><th>Projected return</th><th>Projected volatility</th><th>Mapping</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="note" id="polyProjNote"></p>
   </section>
 
   <section>
