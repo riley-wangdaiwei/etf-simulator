@@ -73,34 +73,6 @@
     </div>
   </section>
 
-  <section id="stressTest">
-    <h2>Geopolitical Stress Test</h2>
-    <p class="stress-label">Synthetic Scenario Data — Hypothetical Assumptions, Not Forecasts</p>
-    <p class="note">Each scenario applies one hypothetical one-period shock to your current portfolio, using the weights above. Portfolio scenario return = the sum of (ETF weight × ETF scenario return). These are manually specified assumptions for learning how a portfolio might react under stress. They are not historical data, not forecasts, and not predictions. The historical backtest above still uses only real market data.</p>
-    <p class="note" id="stressCoverageNote"></p>
-
-    <h3>Scenario summary</h3>
-    <table id="scenarioSummaryTable">
-      <thead><tr><th>Scenario</th><th>Portfolio return</th><th>Largest positive contributor</th><th>Largest negative contributor</th></tr></thead>
-      <tbody></tbody>
-    </table>
-
-    <h3>Edit scenario assumptions</h3>
-    <p class="note">Select a scenario, then edit its assumed ETF returns (%). Changes update all seven charts immediately. Your portfolio allocations are still edited in the Inputs section above.</p>
-    <div class="btn-row" id="scenarioSelectRow"></div>
-    <h3 id="scenarioEditorTitle">—</h3>
-    <p class="note" id="scenarioEditorDesc"></p>
-    <div id="scenarioEditor"></div>
-    <div class="btn-row">
-      <button id="resetScenarioBtn" type="button">Reset this scenario</button>
-      <button id="resetAllScenariosBtn" type="button">Reset all scenarios</button>
-    </div>
-
-    <h3>Seven scenarios</h3>
-    <p class="note">Each chart shows every held ETF's weighted contribution to that scenario's portfolio return. Solid bars are positive contributions, hollow bars are negative contributions. The total is the sum of the bars shown; holdings with no scenario assumption are listed, not counted as zero.</p>
-    <div class="scenario-grid" id="scenarioGrid"></div>
-  </section>
-
   <section>
     <h2>Method and notes</h2>
     <p>Rebalanced monthly to your target weights: each month's portfolio return is the weighted average of the ETFs' monthly returns. The starting point is the first month's adjusted close in the selected range, compounded monthly from there.</p>
@@ -116,7 +88,6 @@
 </footer>
 
 <script src="data.js"></script>
-<script src="scenarios.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

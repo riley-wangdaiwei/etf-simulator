@@ -41,24 +41,3 @@ table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; 
 th, td { text-align: left; padding: 6px 6px 6px 0; border-bottom: 1px solid #222; }
 th { color: #888; font-weight: 400; font-size: 12px; letter-spacing: 1px; }
 footer { margin-top: 50px; color: #666; font-size: 13px; }
-
-/* Geopolitical Stress Test */
-.stress-label { color: #fff; border: 1px solid #888; padding: 8px 10px; margin: 10px 0; font-size: 14px; }
-.scenario-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 8px 0; }
-.scenario-card { border: 1px solid #222; padding: 12px; min-width: 0; }
-.scenario-card.selected { border-color: #fff; }
-.scenario-card.wide { grid-column: 1 / -1; }
-.scenario-card h4 { font-size: 14px; margin: 0 0 4px; }
-.scenario-card .desc { color: #888; font-size: 12px; margin-bottom: 8px; }
-.scenario-total { font-size: 22px; font-weight: 800; margin: 2px 0 8px; }
-.scenario-chart { width: 100%; display: block; background: #000; border: 1px solid #222; margin: 8px 0 4px; }
-.scenario-contrib { font-size: 12px; color: #aaa; margin: 4px 0; }
-.scenario-contrib .unavailable { color: #fff; }
-.scenario-editor-row { display: flex; align-items: baseline; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
-.scenario-editor-row .name { width: 62px; font-weight: 700; }
-.scenario-editor-row input { width: 90px; text-align: right; }
-#scenarioSelectRow button.on { color: #000; background: #fff; border-color: #fff; font-weight: 700; }
-@media (max-width: 700px) {
-  .scenario-grid { grid-template-columns: 1fr; }
-  .scenario-card.wide { grid-column: auto; }
-}

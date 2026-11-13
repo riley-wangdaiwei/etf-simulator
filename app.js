@@ -29,16 +29,6 @@ let drawdownPoints = [];
 let scatterPoints = [];
 let lastCompute = null;
 
-// Geopolitical Stress Test: working copy of the synthetic assumptions.
-// Defaults live in scenarios.js; edits here never touch data.js or the
-// historical backtest. Selections are per session (not persisted).
-let scenarioData = (window.SCENARIO_DEFAULTS || []).map(s => ({
-  id: s.id, name: s.name, description: s.description,
-  returns: Object.assign({}, s.returns)
-}));
-let selectedScenarioId = scenarioData.length ? scenarioData[0].id : null;
-let scenarioResults = []; // per scenario: { total, coveredWeight, contributions, uncovered }
-
 function fmtMoney(x) {
   return '$' + x.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
@@ -118,7 +108,6 @@ function compute() {
   sumLine.className = sum === 100 ? '' : 'bad';
   if (sum !== 100 || initial <= 0 || !window.ETF_DATA || !ETF_DATA.dates.length) {
     err.hidden = !(sum !== 100);
-    updateScenarios();
     return null;
   }
   const dates = ETF_DATA.dates;
@@ -129,7 +118,6 @@ function compute() {
   if (!rs) {
     err.hidden = false;
     err.textContent = 'Data is missing for one of the ETFs with a weight above 0%.';
-    updateScenarios();
     return null;
   }
   err.hidden = true;
@@ -214,245 +202,7 @@ function compute() {
   drawChart();
   drawDrawdown();
   drawScatter();
-  updateScenarios();
   return { final, cum: st.cum, ann: st.ann, vol: st.vol, months };
-}
-
-// ---- Geopolitical Stress Test (synthetic assumptions only) ----
-// Portfolio scenario return = sum over covered ETFs of
-// (weight × assumed scenario return). ETFs with a weight above 0%
-// that have no assumption in the scenario dataset are NEVER counted
-// as zero: they are listed as "Scenario assumption unavailable" and
-// the total is labelled with the covered share of the portfolio.
-function computeScenarioResults() {
-  const { w, sum } = getWeights();
-  const covered = window.SCENARIO_ETFS || [];
-  return scenarioData.map(sc => {
-    if (sum !== 100) return { sc, valid: false, total: null, coveredWeight: 0, contributions: [], uncovered: [] };
-    const contributions = [];
-    const uncovered = [];
-    let coveredWeight = 0;
-    ETFS.forEach(e => {
-      const weight = w[e.sym] || 0;
-      if (weight <= 0) return;
-      if (covered.indexOf(e.sym) === -1 || sc.returns[e.sym] === undefined) {
-        uncovered.push({ sym: e.sym, weight });
-      } else {
-        coveredWeight += weight;
-        contributions.push({
-          sym: e.sym, weight,
-          assumption: sc.returns[e.sym],
-          contribution: weight * sc.returns[e.sym] / 100
-        });
-      }
-    });
-    const total = contributions.reduce((a, c) => a + c.contribution, 0);
-    return { sc, valid: true, total, coveredWeight, contributions, uncovered };
-  });
-}
-
-function fmtContribName(c) {
-  return `${c.sym} ${fmtPct(c.contribution)}`;
-}
-
-function updateScenarios() {
-  if (!scenarioData.length) return;
-  scenarioResults = computeScenarioResults();
-  const { sum } = getWeights();
-  const note = document.getElementById('stressCoverageNote');
-  if (sum !== 100) {
-    note.textContent = 'Adjust the portfolio weights to total 100% to see scenario results.';
-  } else {
-    const allUncovered = [];
-    scenarioResults.forEach(r => r.uncovered.forEach(u => {
-      if (allUncovered.indexOf(u.sym) === -1) allUncovered.push(u.sym);
-    }));
-    note.textContent = allUncovered.length
-      ? `Scenario assumptions cover ${((window.SCENARIO_ETFS || []).join(', '))}. Holdings with no assumption (${allUncovered.join(', ')}) are listed under each scenario as “Scenario assumption unavailable” and are not counted in the totals.`
-      : 'All of your current holdings have a scenario assumption, so each total below is the full portfolio return under that scenario.';
-  }
-  // Summary table.
-  const tbody = document.querySelector('#scenarioSummaryTable tbody');
-  tbody.innerHTML = '';
-  scenarioResults.forEach(r => {
-    const tr = document.createElement('tr');
-    if (!r.valid) {
-      tr.innerHTML = `<td>${r.sc.name}</td><td>—</td><td>—</td><td>—</td>`;
-    } else {
-      const pos = r.contributions.filter(c => c.contribution > 0);
-      const neg = r.contributions.filter(c => c.contribution < 0);
-      const best = pos.length ? pos.reduce((a, c) => c.contribution > a.contribution ? c : a) : null;
-      const worst = neg.length ? neg.reduce((a, c) => c.contribution < a.contribution ? c : a) : null;
-      const totalText = r.coveredWeight < 1
-        ? `${fmtPct(r.total)} *`
-        : fmtPct(r.total);
-      tr.innerHTML = `<td>${r.sc.name}</td><td>${totalText}</td>` +
-        `<td>${best ? fmtContribName(best) : '—'}</td><td>${worst ? fmtContribName(worst) : '—'}</td>`;
-    }
-    tbody.appendChild(tr);
-  });
-  // Cards.
-  scenarioResults.forEach((r, i) => {
-    const card = document.querySelector(`.scenario-card[data-scenario="${r.sc.id}"]`);
-    if (!card) return;
-    card.querySelector('.scenario-total').textContent =
-      !r.valid ? '—' : (r.coveredWeight < 1 ? `${fmtPct(r.total)} *` : fmtPct(r.total));
-    card.querySelector('.scenario-covered').textContent =
-      !r.valid ? '' : (r.coveredWeight < 1
-        ? `* From ${Math.round(r.coveredWeight * 100)}% of the portfolio with assumptions; the rest has no assumption and is not counted.`
-        : 'Full portfolio — all holdings have an assumption.');
-    const list = card.querySelector('.scenario-contrib');
-    list.innerHTML = '';
-    if (r.valid) {
-      const sorted = r.contributions.slice().sort((a, b) => b.contribution - a.contribution);
-      sorted.forEach(c => {
-        const p = document.createElement('p');
-        p.textContent = `${c.sym}: ${Math.round(c.weight * 100)}% × ${c.assumption >= 0 ? '+' : ''}${c.assumption}% = ${fmtPct(c.contribution)}`;
-        list.appendChild(p);
-      });
-      r.uncovered.forEach(u => {
-        const p = document.createElement('p');
-        p.innerHTML = `<span class="unavailable">${u.sym} (${Math.round(u.weight * 100)}%): Scenario assumption unavailable</span>`;
-        list.appendChild(p);
-      });
-    }
-    drawScenarioChart(card.querySelector('.scenario-chart'), r);
-  });
-}
-
-function drawScenarioChart(canvas, r) {
-  if (!canvas) return;
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth || 240;
-  const rows = r.valid ? r.contributions.slice().sort((a, b) => b.contribution - a.contribution) : [];
-  const H = Math.max(90, rows.length * 26 + 24);
-  canvas.style.height = H + 'px';
-  canvas.width = W * dpr; canvas.height = H * dpr;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, W, H);
-  if (!r.valid || !rows.length) {
-    ctx.fillStyle = '#888'; ctx.font = '11px sans-serif';
-    ctx.fillText('Adjust weights to 100% to see contributions.', 8, 20);
-    return;
-  }
-  const labelW = 38, valueW = 52, plotX = labelW, plotW = W - labelW - valueW;
-  const maxAbs = Math.max.apply(null, rows.map(c => Math.abs(c.contribution)).concat([0.005]));
-  const zeroX = plotX + plotW / 2;
-  const halfW = plotW / 2;
-  ctx.font = '11px sans-serif';
-  rows.forEach((c, i) => {
-    const y = 14 + i * 26;
-    ctx.fillStyle = '#eee';
-    ctx.fillText(c.sym, 4, y + 4);
-    const bw = Math.abs(c.contribution) / maxAbs * halfW;
-    if (c.contribution >= 0) {
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(zeroX, y - 6, Math.max(bw, 1), 12);
-      ctx.fillStyle = '#eee';
-      ctx.fillText(fmtPct(c.contribution), zeroX + bw + 4, y + 4);
-    } else {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
-      ctx.strokeRect(zeroX - bw, y - 6, Math.max(bw, 1), 12);
-      ctx.fillStyle = '#eee';
-      const t = fmtPct(c.contribution);
-      ctx.fillText(t, Math.max(plotX, zeroX - bw - ctx.measureText(t).width - 4), y + 4);
-    }
-  });
-  ctx.strokeStyle = '#555'; ctx.beginPath();
-  ctx.moveTo(zeroX, 4); ctx.lineTo(zeroX, H - 8); ctx.stroke();
-  canvas._scenarioRows = rows;
-  canvas._scenarioZeroX = zeroX;
-  canvas._scenarioPlotX = plotX;
-}
-
-function buildScenarioCards() {
-  const grid = document.getElementById('scenarioGrid');
-  grid.innerHTML = '';
-  scenarioData.forEach((sc, i) => {
-    const card = document.createElement('div');
-    card.className = 'scenario-card' + (i === scenarioData.length - 1 ? ' wide' : '') +
-      (sc.id === selectedScenarioId ? ' selected' : '');
-    card.dataset.scenario = sc.id;
-    card.innerHTML = `<h4>${sc.name}</h4><p class="desc">${sc.description}</p>` +
-      `<p class="note">Hypothetical portfolio return</p><p class="scenario-total">—</p>` +
-      `<canvas class="scenario-chart" width="720" height="160"></canvas>` +
-      `<p class="note scenario-hover">Hover over a bar to see its contribution.</p>` +
-      `<div class="scenario-contrib"></div><p class="note scenario-covered"></p>`;
-    grid.appendChild(card);
-    card.querySelector('.scenario-chart').addEventListener('mousemove', e => {
-      const c = e.target;
-      const rows = c._scenarioRows || [];
-      if (!rows.length) return;
-      const rect = c.getBoundingClientRect();
-      const idx = Math.floor(((e.clientY - rect.top) / rect.height) * rows.length);
-      const row = rows[Math.max(0, Math.min(rows.length - 1, idx))];
-      if (row) {
-        card.querySelector('.scenario-hover').textContent =
-          `${row.sym}: ${Math.round(row.weight * 100)}% × ${row.assumption >= 0 ? '+' : ''}${row.assumption}% = ${fmtPct(row.contribution)}`;
-      }
-    });
-  });
-}
-
-function buildScenarioSelector() {
-  const row = document.getElementById('scenarioSelectRow');
-  row.innerHTML = '';
-  scenarioData.forEach(sc => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = sc.name;
-    b.dataset.scenario = sc.id;
-    if (sc.id === selectedScenarioId) b.classList.add('on');
-    b.addEventListener('click', () => {
-      selectedScenarioId = sc.id;
-      buildScenarioSelector();
-      buildScenarioEditor();
-      document.querySelectorAll('.scenario-card').forEach(card =>
-        card.classList.toggle('selected', card.dataset.scenario === sc.id));
-    });
-    row.appendChild(b);
-  });
-}
-
-function buildScenarioEditor() {
-  const sc = scenarioData.find(s => s.id === selectedScenarioId) || scenarioData[0];
-  if (!sc) return;
-  document.getElementById('scenarioEditorTitle').textContent = sc.name;
-  document.getElementById('scenarioEditorDesc').textContent = sc.description;
-  const wrap = document.getElementById('scenarioEditor');
-  wrap.innerHTML = '';
-  (window.SCENARIO_ETFS || []).forEach(sym => {
-    const rowEl = document.createElement('div');
-    rowEl.className = 'scenario-editor-row';
-    rowEl.innerHTML = `<span class="name">${sym}</span>` +
-      `<input type="number" step="0.5" data-sym="${sym}" value="${sc.returns[sym]}"> %`;
-    wrap.appendChild(rowEl);
-  });
-  wrap.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
-    const v = parseFloat(inp.value);
-    if (!isNaN(v)) {
-      sc.returns[inp.dataset.sym] = v;
-      updateScenarios();
-    }
-  }));
-}
-
-function resetScenario(id) {
-  const def = (window.SCENARIO_DEFAULTS || []).find(s => s.id === id);
-  const cur = scenarioData.find(s => s.id === id);
-  if (def && cur) cur.returns = Object.assign({}, def.returns);
-  buildScenarioEditor();
-  updateScenarios();
-}
-
-function resetAllScenarios() {
-  scenarioData = (window.SCENARIO_DEFAULTS || []).map(s => ({
-    id: s.id, name: s.name, description: s.description,
-    returns: Object.assign({}, s.returns)
-  }));
-  buildScenarioEditor();
-  updateScenarios();
 }
 
 function setupCanvas(c) {
@@ -616,21 +366,9 @@ document.getElementById('scatterChart').addEventListener('mousemove', e => {
       `${best.name}: volatility ${fmtPctPlain(best.vol)}, annualized return ${fmtPct(best.ann)}`;
   }
 });
-window.addEventListener('resize', () => {
-  drawChart(); drawDrawdown(); drawScatter();
-  scenarioResults.forEach(r => {
-    const card = document.querySelector(`.scenario-card[data-scenario="${r.sc.id}"]`);
-    if (card) drawScenarioChart(card.querySelector('.scenario-chart'), r);
-  });
-});
-
-document.getElementById('resetScenarioBtn').addEventListener('click', () => resetScenario(selectedScenarioId));
-document.getElementById('resetAllScenariosBtn').addEventListener('click', resetAllScenarios);
+window.addEventListener('resize', () => { drawChart(); drawDrawdown(); drawScatter(); });
 
 buildWeights();
-buildScenarioCards();
-buildScenarioSelector();
-buildScenarioEditor();
 if (window.ETF_DATA && ETF_DATA.META) {
   document.getElementById('sourceLine').textContent =
     `Data source: ${ETF_DATA.META.source}; through ${ETF_DATA.META.asOf}; ${ETF_DATA.META.note}`;
