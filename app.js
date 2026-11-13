@@ -335,7 +335,7 @@ function drawScatterChart(c, points) {
     const overlaps = (y) => occupied.some(b =>
       tx < b.x1 + 2 && tx + w > b.x0 - 2 && y - 11 < b.y1 + 2 && y + 2 > b.y0 - 2);
     let placed = false;
-    for (const dy of [0, 13, -13, 26, -26, 39, -39]) {
+    for (const dy of [0, 18, -18, 36, -36, 54, -54]) {
       const y = ty + dy;
       if (y - 11 < 0 || y > H - 2) continue;
       if (!overlaps(y)) { ty = y; placed = true; break; }
